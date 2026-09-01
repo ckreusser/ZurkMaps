@@ -1,0 +1,3 @@
+Visual reference: BenHickling, Animated Fire, OpenGameArt, CC0.
+https://opengameart.org/content/animated-fire
+Compact 8-frame Zurk Maps sprite strip created for the addon.

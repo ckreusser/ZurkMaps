@@ -1,0 +1,351 @@
+-- Shared Battlecry widget factory. WSG uses this so its large map file does not
+-- spend additional top-level locals on the editor implementation.
+ZurkMapsBattlecry = ZurkMapsBattlecry or {}
+
+function ZurkMapsBattlecry.Create(options)
+    if not options or not options.frame or not options.map or not options.mapBorder then
+        return nil
+    end
+
+    local battlecry = {
+        frame = options.frame,
+        map = options.map,
+        mapBorder = options.mapBorder,
+        db = options.db or {},
+        dbKey = options.dbKey or "battlecryMessage",
+        buttonSize = options.buttonSize or 30,
+        panelHeight = options.panelHeight or 72,
+        hoverGrace = options.hoverGrace or 0.55,
+        closeAt = nil,
+        savingEdit = false,
+        cancelingEdit = false,
+        editing = false,
+    }
+
+    function battlecry:GetFriendlyFaction()
+        if UnitFactionGroup then
+            return UnitFactionGroup("player")
+        end
+        return nil
+    end
+
+    function battlecry:GetDefaultMessage()
+        local faction = self:GetFriendlyFaction()
+        if faction == "Alliance" then
+            return "FOR THE ALLIANCE!"
+        elseif faction == "Horde" then
+            return "FOR THE HORDE!"
+        end
+        return "FOR THE TEAM!"
+    end
+
+    function battlecry:GetMessage()
+        local saved = self.db and self.db[self.dbKey]
+        if type(saved) == "string" and string.find(saved, "%S") then
+            return saved
+        end
+        return self:GetDefaultMessage()
+    end
+
+    function battlecry:TrimMessage(text)
+        text = tostring(text or "")
+        text = string.gsub(text, "^%s+", "")
+        text = string.gsub(text, "%s+$", "")
+        return text
+    end
+
+    function battlecry:SaveEditedMessage()
+        if not self.editBox then
+            return
+        end
+        self.savingEdit = true
+        local text = self:TrimMessage(self.editBox:GetText())
+        if text == "" then
+            text = self:GetDefaultMessage()
+        end
+        self.db[self.dbKey] = text
+        self.currentMessage = text
+        self.editBox:SetText(text)
+        self.editBox:ClearFocus()
+        self.editing = false
+        self.closeAt = nil
+        if self.instruction then
+            self.instruction:SetText("Click message to edit")
+        end
+        if self.panel and self.panel:IsShown() then
+            self.panel:Hide()
+        end
+        self.savingEdit = false
+    end
+
+    function battlecry:ExecuteMessage()
+        local message = self:TrimMessage(self:GetMessage())
+        if message == "" then
+            return
+        end
+
+        local slashCommand, slashArgs = string.match(message, "^/(%S+)%s*(.-)%s*$")
+        if slashCommand then
+            local command = string.lower(slashCommand)
+            if command == "e" or command == "em" or command == "me" then
+                if slashArgs and slashArgs ~= "" then
+                    if options.sendMessage then
+                        options.sendMessage(slashArgs, "EMOTE")
+                    else
+                        SendChatMessage(slashArgs, "EMOTE")
+                    end
+                end
+                return
+            end
+            if DoEmote then
+                DoEmote(string.upper(slashCommand))
+                return
+            end
+        end
+
+        if options.sendMessage then
+            options.sendMessage(message, "YELL")
+        else
+            SendChatMessage(message, "YELL")
+        end
+    end
+
+    function battlecry:CancelEditing()
+        if not self.editBox then
+            return
+        end
+        self.cancelingEdit = true
+        self.editBox:SetText(self:GetMessage())
+        self.editBox:ClearFocus()
+        self.editing = false
+        self.closeAt = nil
+        if self.instruction then
+            self.instruction:SetText("Click message to edit")
+        end
+        if self.panel and self.panel:IsShown() then
+            self.panel:Hide()
+        end
+        self.cancelingEdit = false
+    end
+
+    function battlecry:ShowPanel()
+        if not self.panel then
+            return
+        end
+        self.currentMessage = self:GetMessage()
+        self.savingEdit = false
+        self.cancelingEdit = false
+        self.editBox:SetText(self.currentMessage)
+        if not self.editBox:HasFocus() then
+            self.instruction:SetText("Click message to edit")
+        end
+        self.panel:Show()
+    end
+
+    function battlecry:GetIconTexture()
+        local faction = self:GetFriendlyFaction()
+        if faction == "Alliance" then
+            return "Interface\\Icons\\Ability_Warrior_RallyingCry"
+        elseif faction == "Horde" then
+            return "Interface\\Icons\\Ability_Warrior_WarCry"
+        end
+        return "Interface\\Icons\\Ability_Warrior_BattleShout"
+    end
+
+    function battlecry:IsInteracting()
+        return (self.button and self.button:IsMouseOver())
+            or (self.panel and self.panel:IsShown()
+                and (self.panel:IsMouseOver() or (self.editBox and self.editBox:HasFocus())))
+    end
+
+    battlecry.button = CreateFrame("Button", nil, battlecry.map)
+    battlecry.button:SetSize(battlecry.buttonSize, battlecry.buttonSize)
+    if options.anchorButton then
+        battlecry.button:SetPoint("BOTTOMLEFT", options.anchorButton, "TOPLEFT", 0, options.buttonGap or 5)
+    else
+        battlecry.button:SetPoint("BOTTOMLEFT", battlecry.map, "BOTTOMLEFT", options.xOffset or 7, options.yOffset or 42)
+    end
+    battlecry.button:SetFrameLevel(battlecry.mapBorder:GetFrameLevel() + (options.frameLevelOffset or 3))
+    battlecry.button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+    battlecry.background = battlecry.button:CreateTexture(nil, "BACKGROUND")
+    battlecry.background:SetAllPoints()
+    battlecry.background:SetColorTexture(0.08, 0.055, 0.025, options.backgroundAlpha or 0.52)
+
+    battlecry.icon = battlecry.button:CreateTexture(nil, "ARTWORK")
+    battlecry.icon:SetPoint("TOPLEFT", battlecry.button, "TOPLEFT", 3, -3)
+    battlecry.icon:SetPoint("BOTTOMRIGHT", battlecry.button, "BOTTOMRIGHT", -3, 3)
+    battlecry.icon:SetTexture(battlecry:GetIconTexture())
+    battlecry.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    battlecry.icon:SetAlpha(options.iconAlpha or 0.68)
+
+    if options.createBorder then
+        battlecry.border = options.createBorder(battlecry.button)
+        if battlecry.border then battlecry.border:SetAlpha(options.borderAlpha or 0.72) end
+    end
+
+    battlecry.button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    battlecry.button:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+
+    battlecry.panel = CreateFrame(
+        "Frame",
+        options.panelName or nil,
+        battlecry.frame,
+        BackdropTemplateMixin and "BackdropTemplate" or nil
+    )
+    battlecry.panel:SetFrameStrata("DIALOG")
+    battlecry.panel:SetFrameLevel(95)
+    battlecry.panel:SetClampedToScreen(false)
+    battlecry.panel:EnableMouse(true)
+    battlecry.panel:SetScale(1)
+    battlecry.panel:ClearAllPoints()
+    battlecry.panel:SetPoint("TOPLEFT", battlecry.mapBorder, "BOTTOMLEFT", 0, 5)
+    battlecry.panel:SetPoint("TOPRIGHT", battlecry.mapBorder, "BOTTOMRIGHT", 0, 5)
+    battlecry.panel:SetHeight(battlecry.panelHeight)
+
+    if battlecry.panel.SetBackdrop then
+        battlecry.panel:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true,
+            tileSize = 16,
+            edgeSize = 12,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        battlecry.panel:SetBackdropColor(0.03, 0.03, 0.03, 0.97)
+        battlecry.panel:SetBackdropBorderColor(0.62, 0.55, 0.38, 1)
+    end
+
+    battlecry.title = battlecry.panel:CreateFontString(nil, "OVERLAY")
+    battlecry.title:SetPoint("TOPLEFT", battlecry.panel, "TOPLEFT", 12, -7)
+    battlecry.title:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+    battlecry.title:SetTextColor(1, 0.82, 0.20, 1)
+    battlecry.title:SetText("Battlecry")
+
+    battlecry.instruction = battlecry.panel:CreateFontString(nil, "OVERLAY")
+    battlecry.instruction:SetPoint("TOPLEFT", battlecry.title, "BOTTOMLEFT", 0, -1)
+    battlecry.instruction:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    battlecry.instruction:SetTextColor(0.76, 0.70, 0.54, 1)
+    battlecry.instruction:SetText("Click message to edit")
+
+    battlecry.editBox = CreateFrame("EditBox", nil, battlecry.panel, "InputBoxTemplate")
+    battlecry.editBox:SetPoint("TOPLEFT", battlecry.panel, "TOPLEFT", 12, -39)
+    battlecry.editBox:SetPoint("TOPRIGHT", battlecry.panel, "TOPRIGHT", -84, -39)
+    battlecry.editBox:SetHeight(22)
+    battlecry.editBox:SetAutoFocus(false)
+    battlecry.editBox:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
+    battlecry.editBox:SetMaxLetters(220)
+    battlecry.editBox:SetTextInsets(4, 4, 0, 0)
+    battlecry.editBox:SetText(battlecry:GetMessage())
+
+    battlecry.editBox:SetScript("OnEditFocusGained", function(self)
+        battlecry.editing = true
+        battlecry.instruction:SetText("Press Enter or Okay to save")
+        self:HighlightText()
+    end)
+    battlecry.editBox:SetScript("OnEnterPressed", function()
+        battlecry:SaveEditedMessage()
+    end)
+    battlecry.editBox:SetScript("OnEscapePressed", function()
+        battlecry:CancelEditing()
+    end)
+    battlecry.editBox:SetScript("OnEditFocusLost", function()
+        if battlecry.savingEdit or battlecry.cancelingEdit then
+            return
+        end
+        if battlecry.panel and battlecry.panel:IsShown() then
+            battlecry:CancelEditing()
+        end
+    end)
+
+    battlecry.okayButton = CreateFrame("Button", nil, battlecry.panel, "UIPanelButtonTemplate")
+    battlecry.okayButton:SetSize(64, 22)
+    battlecry.okayButton:SetPoint("TOPRIGHT", battlecry.panel, "TOPRIGHT", -10, -39)
+    battlecry.okayButton:SetText("Okay")
+    battlecry.okayButton:SetScript("OnMouseDown", function()
+        battlecry.savingEdit = true
+    end)
+    battlecry.okayButton:SetScript("OnClick", function()
+        battlecry:SaveEditedMessage()
+    end)
+
+    battlecry.button:SetScript("OnEnter", function(self)
+        battlecry.closeAt = nil
+        battlecry.icon:SetAlpha(options.hoverAlpha or 0.90)
+        if battlecry.border then
+            battlecry.border:SetAlpha(options.hoverAlpha or 0.90)
+        end
+        if options.onHoverStart then
+            options.onHoverStart()
+        end
+        GameTooltip:Hide()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Battlecry")
+        GameTooltip:AddLine(battlecry:GetMessage(), 0.72, 0.66, 0.50, true)
+        GameTooltip:AddLine("Left-click to yell. Right-click to edit.", 0.72, 0.66, 0.50, true)
+        GameTooltip:Show()
+    end)
+
+    battlecry.button:SetScript("OnLeave", function()
+        battlecry.icon:SetAlpha(options.iconAlpha or 0.68)
+        if battlecry.border then
+            battlecry.border:SetAlpha(options.borderAlpha or 0.72)
+        end
+        GameTooltip:Hide()
+    end)
+
+    battlecry.button:SetScript("OnClick", function(_, mouseButton)
+        if mouseButton == "RightButton" then
+            GameTooltip:Hide()
+            battlecry:ShowPanel()
+            battlecry.editBox:SetFocus()
+        elseif mouseButton == "LeftButton" then
+            battlecry:ExecuteMessage()
+        end
+    end)
+
+    battlecry.panel:SetScript("OnEnter", function()
+        battlecry.closeAt = nil
+    end)
+    battlecry.panel:SetScript("OnLeave", function()
+        if not battlecry.editBox:HasFocus() then
+            battlecry.closeAt = GetTime() + battlecry.hoverGrace
+        end
+    end)
+    battlecry.panel:SetScript("OnUpdate", function(self)
+        if not self:IsShown() then
+            return
+        end
+        if battlecry.editBox:HasFocus() then
+            battlecry.closeAt = nil
+            return
+        end
+        if battlecry.button:IsMouseOver() or self:IsMouseOver() then
+            battlecry.closeAt = nil
+            return
+        end
+        if not battlecry.closeAt then
+            battlecry.closeAt = GetTime() + battlecry.hoverGrace
+            return
+        end
+        if GetTime() >= battlecry.closeAt then
+            battlecry.closeAt = nil
+            self:Hide()
+        end
+    end)
+    battlecry.panel:SetScript("OnHide", function()
+        battlecry.closeAt = nil
+        battlecry.savingEdit = false
+        battlecry.cancelingEdit = false
+        if battlecry.editBox:HasFocus() then
+            battlecry:SaveEditedMessage()
+        end
+    end)
+
+    battlecry.panel:Hide()
+    battlecry.frame:HookScript("OnHide", function()
+        battlecry.panel:Hide()
+    end)
+
+    return battlecry
+end
