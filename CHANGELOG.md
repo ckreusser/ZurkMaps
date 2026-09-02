@@ -16,6 +16,7 @@ All notable changes to Zurk Maps will be documented in this file.
 
 ### Changed
 
+- Nudged the WSG enemy-carrier health-bar flame one pixel right for final icon alignment.
 - AV timer boxes now use compact fixed-position clock glyphs, objective-specific placement, faction-colored completion borders, a smooth grow pulse, and a 0.3-second fade.
 - Improved AV tower-destruction fire with a faster, smoother whoosh and centered honor-gain text.
 - Honor Bar battleground estimates now average all recorded games up to the latest 50 rather than only 10.
@@ -30,6 +31,7 @@ All notable changes to Zurk Maps will be documented in this file.
 
 ### Fixed
 
+- Non-rank Honor Bar breakpoint delineations now span the full dark track and use an inner-track mask so they cannot overlap the border.
 - Fixed AV Battlecry custom text being replaced by its default after updates or reloads.
 - Fixed AV objective-timer text fitting, clock-digit movement, timer-box background overhang, completion smoothness, and collisions around Dun Baldar, Iceblood, and Frostwolf objectives.
 - Fixed the friendly WSG flag-carrier player blip obscuring the larger flag marker while preserving carrier hover information.

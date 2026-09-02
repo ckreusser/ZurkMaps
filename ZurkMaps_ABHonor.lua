@@ -656,6 +656,16 @@ function Honor.Create(parentFrame, addonFrame, mapHeight, config)
         marker.tick:SetWidth(10)
         marker.tick:SetPoint("CENTER", marker, "CENTER", 0.5, 0)
 
+        -- Span the complete cross-axis, then clip to the Honor Bar's inner
+        -- dark track so the delineation connects without touching the border.
+        if bar.CreateMaskTexture and marker.tick.AddMaskTexture then
+            marker.tickMask = bar:CreateMaskTexture(nil, "OVERLAY", nil, 5)
+            marker.tickMask:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -2)
+            marker.tickMask:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -2, 2)
+            marker.tickMask:SetTexture("Interface\\Buttons\\WHITE8X8", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+            marker.tick:AddMaskTexture(marker.tickMask)
+        end
+
         marker.rankIcon = marker:CreateTexture(nil, "OVERLAY", nil, 7)
         marker.rankIcon:SetSize(14, 14)
         marker.rankIcon:SetPoint("CENTER", marker, "CENTER", 0, 0)
@@ -833,10 +843,7 @@ function Honor.Refresh(force)
     local previousMilestoneRank = rank
     local iconSize = Clamp(thickness * 0.78, 6, 64)
     local markerSize = iconSize + 2
-    -- Keep non-rank breakpoint ticks one pixel inside the track at each end.
-    -- Fractional bar sizes otherwise let the one-pixel texture occasionally
-    -- snap just beyond the dark background.
-    local tickLength = math.max(4, thickness - 6)
+    local tickLength = math.max(4, thickness)
     for i = 1, 4 do
         local marker = bar.markers[i]
         local milestone = milestones[i]
@@ -848,12 +855,12 @@ function Honor.Refresh(force)
             marker:ClearAllPoints()
             if horizontal then
                 marker:SetPoint("CENTER", bar, "LEFT", markerAxis, 0)
-                marker.tick:SetSize(1, tickLength)
+                marker.tick:SetSize(1, marker.tickMask and tickLength or math.max(4, tickLength - 4))
                 marker.tick:ClearAllPoints()
                 marker.tick:SetPoint("CENTER", marker, "CENTER", 0, 0)
             else
                 marker:SetPoint("CENTER", bar, "BOTTOM", 0, markerAxis)
-                marker.tick:SetSize(tickLength, 1)
+                marker.tick:SetSize(marker.tickMask and tickLength or math.max(4, tickLength - 4), 1)
                 marker.tick:ClearAllPoints()
                 marker.tick:SetPoint("CENTER", marker, "CENTER", 0, 0)
             end

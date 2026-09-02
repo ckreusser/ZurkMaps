@@ -882,7 +882,7 @@ local function MakeCarrierFrame(isFriendly, point, relativePoint)
         glow.flameElapsed = 0
         glow.flameFrame = -1
         glow.flame = glow:CreateTexture(nil, "ARTWORK", nil, -1)
-        glow.flame:SetPoint("CENTER", glow, "CENTER", -2, -1)
+        glow.flame:SetPoint("CENTER", glow, "CENTER", -1, -1)
         glow.flame:SetSize(36, 40)
         glow.flame:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\AV_TowerFire")
         glow.flame:SetTexCoord(1 / 1024, (1 / 8) - (1 / 1024), 0, 1)
@@ -893,14 +893,14 @@ local function MakeCarrierFrame(isFriendly, point, relativePoint)
             -- primary mask. Layering it behind the flame softens the visible
             -- lower cup without widening the bright core.
             glow.flameSoft = glow:CreateTexture(nil, "ARTWORK", nil, -2)
-            glow.flameSoft:SetPoint("CENTER", glow, "CENTER", -2, -1)
+            glow.flameSoft:SetPoint("CENTER", glow, "CENTER", -1, -1)
             glow.flameSoft:SetSize(40, 44)
             glow.flameSoft:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\AV_TowerFire")
             glow.flameSoft:SetTexCoord(1 / 1024, (1 / 8) - (1 / 1024), 0, 1)
             glow.flameSoft:SetBlendMode("ADD")
             glow.flameSoft:SetAlpha(0.08)
             glow.flameSoftMask = glow:CreateMaskTexture(nil, "ARTWORK", nil, -1)
-            glow.flameSoftMask:SetPoint("CENTER", glow, "CENTER", -2, 1)
+            glow.flameSoftMask:SetPoint("CENTER", glow, "CENTER", -1, 1)
             glow.flameSoftMask:SetSize(27, 33)
             glow.flameSoftMask:SetTexture(
                 "Interface\\CharacterFrame\\TempPortraitAlphaMaskSmall",
@@ -913,7 +913,7 @@ local function MakeCarrierFrame(isFriendly, point, relativePoint)
             -- A tall portrait mask pinches the wide lower flame inward. This
             -- reads as a compact vase silhouette instead of a flat bowl while
             -- preserving the animated tips above the flag artwork.
-            glow.flameMask:SetPoint("CENTER", glow, "CENTER", -2, 1)
+            glow.flameMask:SetPoint("CENTER", glow, "CENTER", -1, 1)
             glow.flameMask:SetSize(23, 29)
             glow.flameMask:SetTexture(
                 "Interface\\CharacterFrame\\TempPortraitAlphaMaskSmall",
