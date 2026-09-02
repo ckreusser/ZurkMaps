@@ -1,6 +1,7 @@
 -- Shared right-click options menu and battleground callout-channel routing.
 ZurkMapsOptions = ZurkMapsOptions or {}
 
+local addonName = ...
 local Options = ZurkMapsOptions
 Options.maps = Options.maps or {}
 Options.menu = Options.menu or nil
@@ -11,6 +12,69 @@ local RW_R, RW_G, RW_B = 1.00, 0.22, 0.06
 local BORDER_R, BORDER_G, BORDER_B = 0.84, 0.56, 0.31
 local MENU_BORDER_R, MENU_BORDER_G, MENU_BORDER_B = 0.56, 0.56, 0.56
 local MENU_LEAVE_GRACE = 0.50
+local DEFAULT_MAP_OPACITY = 0.72
+
+local function GetAppearanceDB()
+    ZurkMapsAppearanceDB = ZurkMapsAppearanceDB or {}
+    local db = ZurkMapsAppearanceDB
+    if db.opacityVersion ~= 2 then
+        -- r8 stored a multiplier on top of the map's original 72% alpha.
+        -- Convert once without changing the user's current appearance.
+        db.opacity = (tonumber(db.opacity) or 1) * DEFAULT_MAP_OPACITY
+        db.opacityVersion = 2
+    end
+    return db
+end
+
+function Options.UseClassBlips()
+    return GetAppearanceDB().classBlips == true
+end
+
+function Options.GetOpacity()
+    return math.max(0.10, math.min(1, tonumber(GetAppearanceDB().opacity) or DEFAULT_MAP_OPACITY))
+end
+
+function Options.GetFrameOpacity()
+    return math.min(1, Options.GetOpacity() / DEFAULT_MAP_OPACITY)
+end
+
+local function ApplyMapOpacity(config)
+    local alpha = Options.GetFrameOpacity()
+    if config.frame then config.frame:SetAlpha(alpha) end
+    -- Keep the original contrast at 72%, but let 100% become fully opaque.
+    if config.mapTexture then config.mapTexture:SetAlpha(Options.GetOpacity() / alpha) end
+end
+
+function Options.ApplyOpacity()
+    for _, config in pairs(Options.maps) do
+        ApplyMapOpacity(config)
+    end
+    for bar in pairs(ZurkMapsHonorWidget and ZurkMapsHonorWidget.bars or {}) do
+        bar:SetAlpha(bar:GetParent() == UIParent and Options.GetFrameOpacity() or 1)
+    end
+end
+
+function Options.SetOpacity(value)
+    GetAppearanceDB().opacity = math.max(0.10, math.min(1, tonumber(value) or DEFAULT_MAP_OPACITY))
+    Options.ApplyOpacity()
+end
+
+-- SavedVariables are restored after the Lua files run. Frame registration alone
+-- applies temporary defaults, so apply the saved alpha again once loading ends.
+local appearanceLoader = CreateFrame("Frame")
+appearanceLoader:RegisterEvent("ADDON_LOADED")
+appearanceLoader:SetScript("OnEvent", function(self, _, loadedAddon)
+    if loadedAddon ~= addonName then return end
+    Options.ApplyOpacity()
+    self:UnregisterEvent("ADDON_LOADED")
+end)
+
+function Options.SetClassBlips(enabled)
+    GetAppearanceDB().classBlips = enabled == true
+    for _, config in pairs(Options.maps) do
+        if config.refreshBlips then config.refreshBlips() end
+    end
+end
 
 local function GetChatColor(chatType, fallbackR, fallbackG, fallbackB)
     local info = ChatTypeInfo and ChatTypeInfo[chatType]
@@ -23,6 +87,7 @@ end
 function Options.RegisterMap(mapKey, config)
     if not mapKey or type(config) ~= "table" then return end
     Options.maps[mapKey] = config
+    ApplyMapOpacity(config)
     if config.db and config.db.calloutChannel ~= "RW" then
         config.db.calloutChannel = "BG"
     end
@@ -130,12 +195,16 @@ end
 
 local function CreateMenuButton(parent)
     local button = CreateFrame("Button", nil, parent)
-    button:SetHeight(18)
+    button:SetHeight(20)
     button.text = button:CreateFontString(nil, "OVERLAY")
     button.text:SetFont("Fonts\\FRIZQT__.TTF", 10)
     button.text:SetPoint("LEFT", button, "LEFT", 0, 0)
     button.text:SetJustifyH("LEFT")
     button.text:SetTextColor(1, 1, 1, 1)
+    local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetAllPoints()
+    highlight:SetColorTexture(1, 0.82, 0.45, 0.08)
+    button:RegisterForClicks("LeftButtonUp")
     button:SetScript("OnEnter", function(self)
         self.text:SetTextColor(1.0, 0.90, 0.40, 1)
     end)
@@ -152,298 +221,165 @@ local function CreateDivider(parent)
     return line
 end
 
-local ShowChannelTooltip, SetChannelHover
+local ShowChannelTooltip
+
+local function CreateValueRow(parent, label)
+    local row = CreateMenuButton(parent)
+    row.text:SetText(label)
+    row.value = row:CreateFontString(nil, "OVERLAY")
+    row.value:SetFont("Fonts\\FRIZQT__.TTF", 10)
+    row.value:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    row.value:SetJustifyH("RIGHT")
+    row.value:SetTextColor(0.82, 0.82, 0.82, 1)
+    return row
+end
 
 local function EnsureMenuFrame()
     if Options.menu then return Options.menu end
-
     local frame = CreateFrame("Frame", "ZurkMapsOptionsMenu", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    frame:SetSize(140, 144)
+    frame:SetSize(216, 230)
     frame:SetFrameStrata("DIALOG")
     frame:SetFrameLevel(90)
     frame:SetClampedToScreen(true)
     frame:EnableMouse(true)
     frame:Hide()
-
     if frame.SetBackdrop then
         frame:SetBackdrop({
             bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
             edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 20,
-            insets = { left = 5, right = 5, top = 5, bottom = 5 },
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
         })
-        frame:SetBackdropColor(0.0, 0.0, 0.0, 0.998)
-        frame:SetBackdropBorderColor(0.62, 0.62, 0.62, 0.95)
+        frame:SetBackdropColor(0.025, 0.022, 0.018, 1)
+        frame:SetBackdropBorderColor(0.62, 0.57, 0.47, 1)
     end
-
-    frame.opaqueBG = frame:CreateTexture(nil, "BACKGROUND")
+    -- Tooltip background artwork has built-in transparency even at alpha 1.
+    frame.opaqueBG = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
     frame.opaqueBG:SetPoint("TOPLEFT", frame, "TOPLEFT", 6, -6)
     frame.opaqueBG:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 6)
-    frame.opaqueBG:SetColorTexture(0, 0, 0, 0.96)
-
+    frame.opaqueBG:SetColorTexture(0.025, 0.022, 0.018, 1)
     frame.title = frame:CreateFontString(nil, "OVERLAY")
-    frame.title:SetFont("Fonts\\FRIZQT__.TTF", 13)
-    frame.title:SetText("Options")
-    frame.title:SetTextColor(1.0, 0.84, 0.15, 1)
-    frame.title:SetJustifyH("LEFT")
-    frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 11, -10)
-
+    frame.title:SetFont("Fonts\\FRIZQT__.TTF", 12)
+    frame.title:SetTextColor(1, 0.82, 0.35, 1)
+    frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -11)
     frame.headerDivider = CreateDivider(frame)
-    frame.headerDivider:ClearAllPoints()
-    frame.headerDivider:SetPoint("TOPLEFT", frame.title, "BOTTOMLEFT", 0, -6)
-    frame.headerDivider:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -11, -29)
-    frame.headerDivider:Show()
+    frame.headerDivider:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -28)
+    frame.headerDivider:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -28)
 
-    frame.channelLabel = frame:CreateFontString(nil, "OVERLAY")
-    frame.channelLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
-    frame.channelLabel:SetText("Callout Channel:")
-    frame.channelLabel:SetTextColor(0.72, 0.72, 0.72, 1)
-    frame.channelLabel:SetJustifyH("LEFT")
-    frame.channelLabel:SetPoint("TOPLEFT", frame.title, "BOTTOMLEFT", 0, -14)
-
-    frame.switchRow = CreateFrame("Frame", nil, frame)
-    frame.switchRow:SetSize(112, 20)
-    frame.switchRow:SetPoint("TOP", frame, "TOP", 0, -48)
-
-    frame.leftLabel = frame.switchRow:CreateFontString(nil, "OVERLAY")
-    frame.leftLabel:SetFont("Fonts\\FRIZQT__.TTF", 12)
-    frame.leftLabel:SetText("/bg")
-    frame.leftLabel:SetShadowColor(0, 0, 0, 1)
-    frame.leftLabel:SetShadowOffset(1, -1)
-    frame.leftLabel:SetPoint("LEFT", frame.switchRow, "LEFT", 0, 0)
-
-    frame.switchTrack = CreateFrame("Frame", nil, frame.switchRow, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    frame.switchTrack:SetSize(42, 16)
-    frame.switchTrack:SetPoint("CENTER", frame.switchRow, "CENTER", -2, 0)
-    frame.leftLabel:ClearAllPoints()
-    frame.leftLabel:SetPoint("RIGHT", frame.switchTrack, "LEFT", -4, -1)
+    frame.switchClickArea = CreateValueRow(frame, "Callout Channel")
+    frame.channelLabel = frame.switchClickArea.text
+    frame.switchClickArea.value:Hide()
+    frame.rightLabel = frame.switchClickArea:CreateFontString(nil, "OVERLAY")
+    frame.rightLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
+    frame.rightLabel:SetText("/RW")
+    frame.rightLabel:SetPoint("RIGHT", frame.switchClickArea, "RIGHT", 0, 0)
+    frame.switchTrack = CreateFrame("Frame", nil, frame.switchClickArea, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    frame.switchTrack:SetSize(32, 14)
+    frame.switchTrack:SetPoint("RIGHT", frame.rightLabel, "LEFT", -4, 0)
+    frame.switchTrack:EnableMouse(false)
     if frame.switchTrack.SetBackdrop then
         frame.switchTrack:SetBackdrop({
-            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 8, insets = { left = 2, right = 2, top = 2, bottom = 2 },
         })
-        frame.switchTrack:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
-        frame.switchTrack:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.90)
+        frame.switchTrack:SetBackdropColor(0.08, 0.07, 0.05, 1)
+        frame.switchTrack:SetBackdropBorderColor(0.55, 0.50, 0.40, 1)
     end
-
-    frame.switchTrack.inner = frame.switchTrack:CreateTexture(nil, "ARTWORK")
-    frame.switchTrack.inner:SetPoint("TOPLEFT", frame.switchTrack, "TOPLEFT", 2, -2)
-    frame.switchTrack.inner:SetPoint("BOTTOMRIGHT", frame.switchTrack, "BOTTOMRIGHT", -2, 2)
-    frame.switchTrack.inner:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
-    frame.switchTrack.inner:SetVertexColor(0.01, 0.01, 0.01, 1.00)
-
-    frame.switchTrack.thumbPlate = frame.switchTrack:CreateTexture(nil, "OVERLAY")
-    frame.switchTrack.thumbPlate:SetSize(0, 0)
-    frame.switchTrack.thumbPlate:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
-    frame.switchTrack.thumbPlate:SetVertexColor(0.26, 0.26, 0.28, 0.00)
-    frame.switchTrack.thumbPlate:Hide()
-
     frame.switchTrack.thumb = frame.switchTrack:CreateTexture(nil, "OVERLAY")
-    frame.switchTrack.thumb:SetSize(20, 12)
+    frame.switchTrack.thumb:SetSize(16, 10)
     if frame.switchTrack.thumb.SetAtlas then
         frame.switchTrack.thumb:SetAtlas("wowlabs-switch-slots-key", false)
+    else
+        frame.switchTrack.thumb:SetColorTexture(0.9, 0.78, 0.50, 1)
     end
-    frame.switchTrack.thumb:SetBlendMode("BLEND")
-    frame.switchTrack.thumb:SetVertexColor(1, 1, 1, 1)
-    frame.switchTrack.thumb:SetAlpha(0.98)
+    frame.leftLabel = frame.switchClickArea:CreateFontString(nil, "OVERLAY")
+    frame.leftLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
+    frame.leftLabel:SetText("/bg")
+    frame.leftLabel:SetPoint("RIGHT", frame.switchTrack, "LEFT", -4, 0)
+    frame.switchClickArea:HookScript("OnEnter", function(self) ShowChannelTooltip(self) end)
+    frame.switchClickArea:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
-    frame.rightLabel = frame.switchRow:CreateFontString(nil, "OVERLAY")
-    frame.rightLabel:SetFont("Fonts\\FRIZQT__.TTF", 12)
-    frame.rightLabel:SetText("/RW")
-    frame.rightLabel:SetShadowColor(0, 0, 0, 1)
-    frame.rightLabel:SetShadowOffset(1, -1)
-    frame.rightLabel:SetPoint("LEFT", frame.switchTrack, "RIGHT", 4, -1)
-
-    frame.switchClickArea = CreateFrame("Button", nil, frame)
-    frame.switchClickArea:ClearAllPoints()
-    frame.switchClickArea:SetPoint("TOPLEFT", frame.channelLabel, "TOPLEFT", -2, 2)
-    frame.switchClickArea:SetPoint("BOTTOMRIGHT", frame.switchRow, "BOTTOMRIGHT", 2, -2)
-    frame.switchClickArea:RegisterForClicks("LeftButtonUp")
-    frame.switchClickArea:SetFrameLevel(frame.switchRow:GetFrameLevel() + 10)
-    frame.switchClickArea:SetScript("OnEnter", function(self)
-        SetChannelHover(frame, true)
-        ShowChannelTooltip(self)
+    frame.classButton = CreateValueRow(frame, "Teammate Blips")
+    frame.classButton:SetScript("OnClick", function(self)
+        Options.SetClassBlips(not Options.UseClassBlips())
+        self.value:SetText(Options.UseClassBlips() and "Class Colors" or "Gold")
     end)
-    frame.switchClickArea:SetScript("OnLeave", function()
-        SetChannelHover(frame, false)
-        GameTooltip:Hide()
-    end)
-
-    frame.honorRow = CreateFrame("Frame", nil, frame)
-    frame.honorRow:SetSize(116, 18)
-    frame.honorLabel = frame.honorRow:CreateFontString(nil, "OVERLAY")
-    frame.honorLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
-    frame.honorLabel:SetText("Honor Bar")
-    frame.honorLabel:SetTextColor(1, 1, 1, 1)
-    frame.honorLabel:SetPoint("LEFT", frame.honorRow, "LEFT", 0, 0)
-
-    frame.honorModeValue = frame.honorRow:CreateFontString(nil, "OVERLAY")
-    frame.honorModeValue:SetFont("Fonts\\FRIZQT__.TTF", 10)
-    frame.honorModeValue:SetPoint("RIGHT", frame.honorRow, "RIGHT", 0, 0)
-    frame.honorModeValue:SetJustifyH("RIGHT")
-
-    frame.honorToggle = CreateFrame("CheckButton", nil, frame.honorRow, "UICheckButtonTemplate")
-    frame.honorToggle:SetSize(1, 1)
-    frame.honorToggle:Hide()
-    frame.honorToggle:EnableMouse(false)
-
-    frame.honorClickArea = CreateFrame("Button", nil, frame.honorRow)
-    frame.honorClickArea:SetAllPoints(frame.honorRow)
-    frame.honorClickArea:RegisterForClicks("LeftButtonUp")
-    frame.honorClickArea:SetFrameLevel(frame.honorRow:GetFrameLevel() + 10)
-    frame.honorClickArea:SetScript("OnEnter", function(self)
-        frame.honorLabel:SetTextColor(1.0, 0.90, 0.40, 1)
-        if frame.honorModeValue then frame.honorModeValue:SetTextColor(1.0, 0.90, 0.40, 1) end
-        GameTooltip:Hide()
+    frame.honorRow = CreateValueRow(frame, "Honor Bar")
+    frame.honorLabel, frame.honorModeValue = frame.honorRow.text, frame.honorRow.value
+    frame.honorClickArea = frame.honorRow
+    frame.honorRow:HookScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Honor Bar Mode")
-        GameTooltip:AddLine("Off: hidden everywhere.", 0.78, 0.78, 0.78, true)
-        GameTooltip:AddLine("Attached: follows the active Zurk Map.", 0.78, 0.78, 0.78, true)
-        GameTooltip:AddLine("Persistent: stays on your UI outside battlegrounds.", 0.78, 0.78, 0.78, true)
-        GameTooltip:AddLine("Click to cycle modes.", 1.0, 0.82, 0.20, true)
+        GameTooltip:SetText("Honor Bar")
+        GameTooltip:AddLine("Click to cycle: Off, Attached, Persistent.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("Attached follows the map. Persistent stays visible outside battlegrounds.", 0.75, 0.75, 0.75, true)
         GameTooltip:Show()
     end)
-    frame.honorClickArea:SetScript("OnLeave", function()
-        frame.honorLabel:SetTextColor(1, 1, 1, 1)
-        if frame.honorModeValue then
-            local mode = frame.honorBarMode or "ATTACHED"
-            if mode == "OFF" then
-                frame.honorModeValue:SetTextColor(0.55, 0.55, 0.55, 1)
-            elseif mode == "PERSISTENT" then
-                frame.honorModeValue:SetTextColor(1.0, 0.82, 0.20, 1)
-            else
-                frame.honorModeValue:SetTextColor(0.82, 0.82, 0.82, 1)
-            end
-        end
-        GameTooltip:Hide()
-    end)
-    frame.honorRow:Hide()
-
-    frame.honorUnlockRow = CreateFrame("Frame", nil, frame)
-    frame.honorUnlockRow:SetSize(116, 18)
-    frame.honorUnlockLabel = frame.honorUnlockRow:CreateFontString(nil, "OVERLAY")
-    frame.honorUnlockLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
-    frame.honorUnlockLabel:SetText("Unlock Honor Bar")
-    frame.honorUnlockLabel:SetTextColor(1, 1, 1, 1)
-    frame.honorUnlockLabel:SetPoint("LEFT", frame.honorUnlockRow, "LEFT", 0, 0)
-
-    frame.honorUnlockToggle = CreateFrame("CheckButton", nil, frame.honorUnlockRow, "UICheckButtonTemplate")
-    frame.honorUnlockToggle:SetSize(20, 20)
-    frame.honorUnlockToggle:SetPoint("LEFT", frame.honorUnlockLabel, "RIGHT", 4, 0)
-    frame.honorUnlockToggle:SetChecked(false)
-    frame.honorUnlockToggle:EnableMouse(false)
-    frame.honorUnlockClickArea = CreateFrame("Button", nil, frame.honorUnlockRow)
-    frame.honorUnlockClickArea:SetAllPoints(frame.honorUnlockRow)
-    frame.honorUnlockClickArea:RegisterForClicks("LeftButtonUp")
-    frame.honorUnlockClickArea:SetFrameLevel(frame.honorUnlockRow:GetFrameLevel() + 10)
-    frame.honorUnlockClickArea:SetScript("OnEnter", function()
-        frame.honorUnlockLabel:SetTextColor(1.0, 0.90, 0.40, 1)
-    end)
-    frame.honorUnlockClickArea:SetScript("OnLeave", function()
-        frame.honorUnlockLabel:SetTextColor(1, 1, 1, 1)
-    end)
-    frame.honorUnlockRow:Hide()
-
-    frame.testRow = CreateFrame("Frame", nil, frame)
-    frame.testRow:SetSize(116, 18)
-    frame.testLabel = frame.testRow:CreateFontString(nil, "OVERLAY")
-    frame.testLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
-    frame.testLabel:SetText("Test Mode")
-    frame.testLabel:SetTextColor(1, 1, 1, 1)
-    frame.testLabel:SetPoint("LEFT", frame.testRow, "LEFT", 0, 0)
-
-    frame.testToggle = CreateFrame("CheckButton", nil, frame.testRow, "UICheckButtonTemplate")
-    frame.testToggle:SetSize(20, 20)
-    frame.testToggle:SetPoint("LEFT", frame.testLabel, "RIGHT", 4, 0)
-    frame.testToggle:SetChecked(false)
-    frame.testToggle:EnableMouse(false)
-    frame.testClickArea = CreateFrame("Button", nil, frame.testRow)
-    frame.testClickArea:SetAllPoints(frame.testRow)
-    frame.testClickArea:RegisterForClicks("LeftButtonUp")
-    frame.testClickArea:SetFrameLevel(frame.testRow:GetFrameLevel() + 10)
-    frame.testClickArea:SetScript("OnEnter", function()
-        frame.testLabel:SetTextColor(1.0, 0.90, 0.40, 1)
-    end)
-    frame.testClickArea:SetScript("OnLeave", function()
-        frame.testLabel:SetTextColor(1, 1, 1, 1)
-    end)
-    frame.honorRow:Hide()
-    frame.testRow:Hide()
-
+    frame.honorRow:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    frame.honorUnlockRow = CreateValueRow(frame, "Honor Bar Position")
+    frame.honorUnlockClickArea = frame.honorUnlockRow
+    frame.testRow = CreateValueRow(frame, "Test Mode")
+    frame.testClickArea = frame.testRow
     frame.dividers = { CreateDivider(frame), CreateDivider(frame) }
     frame.buttons = {}
-    for i = 1, 8 do
-        frame.buttons[i] = CreateMenuButton(frame)
-    end
+    for i = 1, 8 do frame.buttons[i] = CreateMenuButton(frame) end
     frame.closeButton = CreateMenuButton(frame)
     frame.closeButton.text:SetText("Close Map")
-
-    frame:SetScript("OnMouseUp", nil)
-    frame:SetScript("OnShow", function(self)
-        self.leaveElapsed = 0
+    frame.opacityLabel = frame:CreateFontString(nil, "OVERLAY")
+    frame.opacityLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
+    frame.opacityLabel:SetText("Map Opacity")
+    frame.opacityValue = frame:CreateFontString(nil, "OVERLAY")
+    frame.opacityValue:SetFont("Fonts\\FRIZQT__.TTF", 10)
+    frame.opacityValue:SetTextColor(0.82, 0.82, 0.82, 1)
+    frame.opacitySlider = CreateFrame("Slider", nil, frame, "OptionsSliderTemplate")
+    frame.opacitySlider:SetOrientation("HORIZONTAL")
+    frame.opacitySlider:SetMinMaxValues(10, 100)
+    frame.opacitySlider:SetValueStep(1)
+    frame.opacitySlider:SetObeyStepOnDrag(true)
+    frame.opacitySlider:SetSize(180, 16)
+    -- Hide template endpoint captions; the value is aligned with other settings.
+    for _, key in ipairs({ "Low", "High", "Text" }) do
+        if frame.opacitySlider[key] then frame.opacitySlider[key]:Hide() end
+    end
+    frame.opacitySlider:SetScript("OnMouseDown", function() frame.opacityDragging = true end)
+    frame.opacitySlider:SetScript("OnMouseUp", function() frame.opacityDragging = false end)
+    frame.opacitySlider:SetScript("OnHide", function() frame.opacityDragging = false end)
+    frame.opacitySlider:SetScript("OnValueChanged", function(_, value)
+        value = math.floor(value + 0.5)
+        frame.opacityValue:SetText(value .. "%")
+        if not frame.building then Options.SetOpacity(value / 100) end
     end)
+    frame:SetScript("OnShow", function(self) self.leaveElapsed = 0 end)
     frame:SetScript("OnUpdate", function(self, elapsed)
-        local hovered = false
-        if self.IsMouseOver then
-            hovered = self:IsMouseOver()
-        elseif MouseIsOver then
-            hovered = MouseIsOver(self)
-        end
-
-        if hovered then
-            self.leaveElapsed = 0
-            return
-        end
-
+        local hovered = self.IsMouseOver and self:IsMouseOver() or (MouseIsOver and MouseIsOver(self))
+        if hovered or self.opacityDragging then self.leaveElapsed = 0; return end
         self.leaveElapsed = (self.leaveElapsed or 0) + (elapsed or 0)
-        if self.leaveElapsed >= MENU_LEAVE_GRACE then
-            self.leaveElapsed = 0
-            self:Hide()
-        end
+        if self.leaveElapsed >= MENU_LEAVE_GRACE then self:Hide() end
     end)
     frame:SetScript("OnHide", function(self)
         self.leaveElapsed = 0
-        SetChannelHover(frame, false)
         GameTooltip:Hide()
         if Options.dismiss then Options.dismiss:Hide() end
     end)
-
     Options.menu = frame
     return frame
 end
 
 local function UpdateSwitchVisuals(frame)
-    local selected = frame.currentChannel or "BG"
-    local OFF_R, OFF_G, OFF_B = 0.43, 0.43, 0.43
-
-    if selected == "RW" then
-        frame.leftLabel:SetTextColor(OFF_R, OFF_G, OFF_B, 1)
+    local raidWarning = frame.currentChannel == "RW"
+    frame.leftLabel:SetTextColor(0.43, 0.43, 0.43, 1)
+    frame.rightLabel:SetTextColor(0.43, 0.43, 0.43, 1)
+    if raidWarning then
         frame.rightLabel:SetTextColor(RW_R, RW_G, RW_B, 1)
-        frame.switchTrack.thumb:ClearAllPoints()
-        frame.switchTrack.thumb:SetPoint("CENTER", frame.switchTrack, "CENTER", 9, 0)
     else
         frame.leftLabel:SetTextColor(BG_R, BG_G, BG_B, 1)
-        frame.rightLabel:SetTextColor(OFF_R, OFF_G, OFF_B, 1)
-        frame.switchTrack.thumb:ClearAllPoints()
-        frame.switchTrack.thumb:SetPoint("CENTER", frame.switchTrack, "CENTER", -9, 0)
     end
-
-    frame.switchTrack.thumb:SetVertexColor(1, 1, 1, 1)
-    frame.switchTrack.thumb:SetAlpha(0.98)
+    frame.switchTrack.thumb:ClearAllPoints()
+    frame.switchTrack.thumb:SetPoint("CENTER", frame.switchTrack, "CENTER", raidWarning and 7 or -7, 0)
 end
 
 local function UpdateTestToggleVisuals(frame)
-    if not frame.testRow then return end
-    local active = frame.testModeActive and true or false
-    if frame.testToggle and frame.testToggle.SetChecked then
-        frame.testToggle:SetChecked(active)
-    end
+    frame.testRow.value:SetText(frame.testModeActive and "On" or "Off")
 end
 
 local function GetHonorBarMode(config)
@@ -486,11 +422,7 @@ local function UpdateHonorToggleVisuals(frame)
 end
 
 local function UpdateHonorUnlockVisuals(frame)
-    if not frame.honorUnlockRow then return end
-    local active = frame.honorBarUnlocked and true or false
-    if frame.honorUnlockToggle and frame.honorUnlockToggle.SetChecked then
-        frame.honorUnlockToggle:SetChecked(active)
-    end
+    frame.honorUnlockRow.value:SetText(frame.honorBarUnlocked and "Unlocked" or "Locked")
 end
 
 local function IsTestModeActive(config)
@@ -560,25 +492,10 @@ ShowChannelTooltip = function(owner)
     GameTooltip:Show()
 end
 
-SetChannelHover = function(frame, hovered)
-    if not frame or not frame.channelLabel or not frame.switchTrack then return end
-    if hovered then
-        frame.channelLabel:SetTextColor(1.0, 0.90, 0.40, 1)
-        if frame.switchTrack.SetBackdropBorderColor then
-            frame.switchTrack:SetBackdropBorderColor(0.75, 0.75, 0.75, 0.95)
-        end
-    else
-        frame.channelLabel:SetTextColor(0.72, 0.72, 0.72, 1)
-        if frame.switchTrack.SetBackdropBorderColor then
-            frame.switchTrack:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.90)
-        end
-    end
-end
-
 local function BuildMenu(frame, config)
     frame.mapKey = config.mapKey
     frame.config = config
-    frame.title:SetText("Options")
+    frame.title:SetText((config.mapKey or "Map") .. " Options")
     frame.currentChannel = Options.GetCalloutChannel(frame.mapKey)
     frame.testModeActive = IsTestModeActive(config)
     frame.honorBarMode = GetHonorBarMode(config)
@@ -632,72 +549,73 @@ local function BuildMenu(frame, config)
     frame.honorUnlockRow:Hide()
     frame.testRow:Hide()
 
-    local rowY = -72
-    local usedButtons = 0
-    local usedDividers = 0
-
-    local showTestToggle = false
-    local showHonorToggle = (ZurkMapsHonorWidget and ZurkMapsHonorWidget.GetMode) or
+    local rowY = -34
+    local function PlaceRow(row)
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, rowY)
+        row:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, rowY)
+        row:Show()
+        rowY = rowY - 20
+    end
+    local function PlaceDivider(index)
+        rowY = rowY - 3
+        local line = frame.dividers[index]
+        line:ClearAllPoints()
+        line:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, rowY)
+        line:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, rowY)
+        line:Show()
+        rowY = rowY - 4
+    end
+    PlaceRow(frame.switchClickArea)
+    frame.classButton.value:SetText(Options.UseClassBlips() and "Class Colors" or "Gold")
+    PlaceRow(frame.classButton)
+    local showHonor = (ZurkMapsHonorWidget and ZurkMapsHonorWidget.GetMode) or
         (type(config.isHonorBarVisible) == "function" and type(config.setHonorBarVisible) == "function")
-    local showHonorUnlock = frame.honorBarMode ~= "OFF" and ((ZurkMapsHonorWidget and ZurkMapsHonorWidget.IsUnlocked) or
-        (type(config.isHonorBarUnlocked) == "function" and type(config.setHonorBarUnlocked) == "function"))
+    if showHonor then
+        PlaceRow(frame.honorRow)
+        local canUnlock = (ZurkMapsHonorWidget and ZurkMapsHonorWidget.IsUnlocked) or
+            (type(config.isHonorBarUnlocked) == "function" and type(config.setHonorBarUnlocked) == "function")
+        if frame.honorBarMode ~= "OFF" and canUnlock then PlaceRow(frame.honorUnlockRow) end
+    end
+    PlaceDivider(1)
     for _, entry in ipairs(config.commands or {}) do
-        if entry.label == "Start Test" or entry.label == "Stop Test" then
-            showTestToggle = true
-        elseif entry.label and entry.command and entry.label ~= "Hide Map" then
+        if entry.label == "Start Test" then PlaceRow(frame.testRow); break end
+    end
+    local usedButtons = 0
+    for _, entry in ipairs(config.commands or {}) do
+        if entry.label and entry.command and entry.label ~= "Hide Map"
+            and entry.label ~= "Start Test" and entry.label ~= "Stop Test" then
             usedButtons = usedButtons + 1
             local button = frame.buttons[usedButtons]
             if button then
-                button:ClearAllPoints()
-                button:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, rowY)
-                button:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, rowY)
                 button.text:SetText(entry.label)
                 button:SetScript("OnClick", function()
                     if config.runCommand then config.runCommand(entry.command) end
                     frame:Hide()
                 end)
-                button:Show()
-                rowY = rowY - 20
+                PlaceRow(button)
             end
         end
     end
-
-    if showHonorToggle then
-        frame.honorRow:ClearAllPoints()
-        frame.honorRow:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, rowY)
-        frame.honorRow:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, rowY)
-        frame.honorRow:Show()
-        rowY = rowY - 20
-    end
-
-    if showHonorUnlock then
-        frame.honorUnlockRow:ClearAllPoints()
-        frame.honorUnlockRow:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, rowY)
-        frame.honorUnlockRow:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, rowY)
-        frame.honorUnlockRow:Show()
-        rowY = rowY - 20
-    end
-
-    if showTestToggle then
-        frame.testRow:ClearAllPoints()
-        frame.testRow:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, rowY)
-        frame.testRow:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, rowY)
-        frame.testRow:Show()
-        rowY = rowY - 20
-    end
-
-    frame.closeButton:ClearAllPoints()
-    frame.closeButton:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, rowY)
-    frame.closeButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, rowY)
+    PlaceRow(frame.closeButton)
     frame.closeButton:SetScript("OnClick", function()
-        if config.runCommand then
-            config.runCommand(config.closeCommand or "hide")
-        end
+        if config.runCommand then config.runCommand(config.closeCommand or "hide") end
         frame:Hide()
     end)
-
-    local finalHeight = math.max(128, 28 - rowY)
-    frame:SetHeight(finalHeight)
+    PlaceDivider(2)
+    rowY = rowY - 2
+    frame.opacityLabel:ClearAllPoints()
+    frame.opacityLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, rowY)
+    frame.opacityValue:ClearAllPoints()
+    frame.opacityValue:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, rowY)
+    frame.opacitySlider:ClearAllPoints()
+    frame.opacitySlider:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, rowY - 15)
+    frame.opacitySlider:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -18, rowY - 15)
+    frame.building = true
+    frame.opacitySlider:SetValue(Options.GetOpacity() * 100)
+    frame.building = false
+    frame.opacityValue:SetText(math.floor(Options.GetOpacity() * 100 + 0.5) .. "%")
+    frame:SetHeight(40 - rowY)
 end
 
 function Options.OpenMapMenu(mapKey)
@@ -712,6 +630,7 @@ function Options.OpenMapMenu(mapKey)
         and ZurkMapsHonorWidget.SetActiveMap then
         ZurkMapsHonorWidget.SetActiveMap(mapKey)
     end
+    Options.ApplyOpacity()
     BuildMenu(menu, config)
 
     GameTooltip:Hide()
@@ -721,3 +640,11 @@ function Options.OpenMapMenu(mapKey)
     menu:Show()
     return true
 end
+
+-- One startup hint, after every map has registered its slash commands.
+local loginHint = CreateFrame("Frame")
+loginHint:RegisterEvent("PLAYER_LOGIN")
+loginHint:SetScript("OnEvent", function(self)
+    print("|cff33ff99Zurk Maps|r: |cffffff00/wsg|r (Warsong Gulch)  |cffffff00/ab|r (Arathi Basin)  |cffffff00/av|r (Alterac Valley)")
+    self:UnregisterEvent("PLAYER_LOGIN")
+end)

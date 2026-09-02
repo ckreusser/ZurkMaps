@@ -1030,6 +1030,9 @@ local function UpdateAVTestBlips()
         else
             ZurkMapsPlayerBlips.ApplyGoldBlip(blip,dotSize,AV_TEST_GOLD_R,AV_TEST_GOLD_G,AV_TEST_GOLD_B)
         end
+        if (not assigned or (ZurkMapsPlayerIcons.IsOverlayOnlyIcon and ZurkMapsPlayerIcons.IsOverlayOnlyIcon(assigned))) then
+            ZurkMapsPlayerBlips.ApplyTeammateColor(blip, agent.classToken, assigned)
+        end
         blip:ClearAllPoints()
         blip:SetPoint("CENTER",map,"TOPLEFT",agent.x*mapWidth,-(agent.y*mapHeight))
         blip:SetShown(avTestMode)
@@ -1776,6 +1779,9 @@ end
 
 if ZurkMapsOptions then
     ZurkMapsOptions.RegisterMap("AV", {
+        frame = frame,
+        mapTexture = mapTexture,
+        refreshBlips = function() ConfigureFriendlyPlayerDots(); if UpdateAVTestBlips then UpdateAVTestBlips() end end,
         title="Alterac Valley",
         db=ZurksAVCalloutMapDB,
         closeCommand="hide",

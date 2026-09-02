@@ -2419,9 +2419,12 @@ UpdateWSGTestBlips = function()
         elseif assignedIcon and ZurkMapsPlayerIcons.ApplyAssignedIcon then
             ZurkMapsPlayerIcons.ApplyAssignedIcon(blip, assignedIcon, dotSize * (ZurkMapsPlayerIcons.manualIconScale or 0.84))
         elseif agent.pvpRankNumber and agent.pvpRankNumber >= ZurkMapsWSGRank.min and agent.pvpRankNumber <= ZurkMapsWSGRank.max then
-            ZurkMapsPlayerBlips.ApplyRankBadge(blip, agent.pvpRankNumber, dotSize * ZurkMapsWSGRank.iconScale)
+            ZurkMapsPlayerBlips.ApplyRankBadge(blip, agent.pvpRankNumber, dotSize * ZurkMapsWSGRank.iconScale, agent.classToken)
         else
             ZurkMapsPlayerBlips.ApplyGoldBlip(blip, dotSize, ZurkMapsWSGTestSim.gold[1], ZurkMapsWSGTestSim.gold[2], ZurkMapsWSGTestSim.gold[3])
+        end
+        if (not assignedIcon or (ZurkMapsPlayerIcons.IsOverlayOnlyIcon and ZurkMapsPlayerIcons.IsOverlayOnlyIcon(assignedIcon))) and (assignedIcon or not agent.pvpRankNumber or agent.pvpRankNumber < ZurkMapsWSGRank.min or agent.pvpRankNumber > ZurkMapsWSGRank.max) then
+            ZurkMapsPlayerBlips.ApplyTeammateColor(blip, agent.classToken, eliteAssigned)
         end
         blip:ClearAllPoints()
         blip:SetPoint("CENTER", map, "TOPLEFT", agent.x * mapWidth, -(agent.y * mapHeight))
@@ -3619,6 +3622,9 @@ end
 
 if ZurkMapsOptions then
     ZurkMapsOptions.RegisterMap("WSG", {
+        frame = frame,
+        mapTexture = mapTexture,
+        refreshBlips = function() ConfigureFriendlyPlayerDots(); if UpdateWSGTestBlips then UpdateWSGTestBlips() end end,
         title = "Warsong Gulch",
         db = ZurksWSGCalloutMapDB,
         closeCommand = "hide",
@@ -3715,5 +3721,3 @@ end)
 
 -- The frame starts hidden near creation time, before secure child buttons are added.
 -- Zone events will show it automatically in WSG.
-
-print("|cff33ff99Zurk Maps|r loaded. Type |cffffff00/wsg|r for options.")

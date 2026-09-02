@@ -2,6 +2,29 @@
 
 All notable changes to Zurk Maps will be documented in this file.
 
+## Zurk Maps 1.3.0-r16
+
+### Added
+
+- Added a shared Gold / Class Colors setting for teammate blips across Warsong Gulch, Arathi Basin, and Alterac Valley, saved across reloads.
+- Added compact Warcraft-style class blips with faceted centers and forged rims. The approved rounded artwork is retained as an alternative asset.
+- Added class-colored rank 12, 13, and 14 helmets, including matching tooltip icons and existing rank test previews. Only helmet pixels are recolored; rank-14 backgrounds, rank-13/14 gold bars, original transparency, and shadows are preserved.
+- Added a Map Opacity slider at the bottom of the right-click menu, shared across all three maps and saved across reloads.
+
+### Changed
+
+- Reorganized the right-click menu into aligned settings, grouped actions, and an opacity footer, with consistent row spacing and a compact `/bg` / `/RW` toggle switch.
+- Reduced the menu height by approximately 18% while retaining its option order, controls, and font sizes.
+- Consolidated startup chat into one line listing `/wsg` (Warsong Gulch), `/ab` (Arathi Basin), and `/av` (Alterac Valley).
+- Reduced ordinary class-blip size and refined their highlights and shading while retaining the existing Elite appearance.
+
+### Fixed
+
+- Made the opacity slider reflect actual map opacity: the original appearance is 72%, and 100% makes the map fully opaque.
+- Reapplied opacity after SavedVariables load so the rendered map and slider remain synchronized after login or reload.
+- Prevented opening the menu from rounding or changing saved opacity, and made the menu background opaque for readability.
+- Replaced whole-badge rank tinting with 27 helmet-only class textures, removing unwanted orange and muddy color shifts while preserving original backgrounds and gold bars.
+
 ## Zurk Maps 1.3.0-r7
 
 ### Rank-up celebrations

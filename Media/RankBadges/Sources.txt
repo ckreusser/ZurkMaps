@@ -1,0 +1,13 @@
+Original World of Warcraft rank badge artwork belongs to Blizzard Entertainment.
+Original 32x32 RGBA textures retrieved from the classic branch of Gethe/wow-ui-textures:
+https://raw.githubusercontent.com/Gethe/wow-ui-textures/classic/PvPRankBadges/PvPRank12.PNG
+https://raw.githubusercontent.com/Gethe/wow-ui-textures/classic/PvPRankBadges/PvPRank13.PNG
+https://raw.githubusercontent.com/Gethe/wow-ui-textures/classic/PvPRankBadges/PvPRank14.PNG
+
+User-authorized deterministic Python pixel recoloring for Zurk Maps r16.
+HelmetMasks.json contains the exact editable coordinates for each rank.
+The rank-12 helmet silhouette separates the helmet from the rank-13/14 bars.
+Its intersection with gold pixels in each source preserves rank-14 silver trim.
+All pixels outside the mask and all alpha values are unchanged.
+Class-specific textures contain their final colors and must render with white vertex color.
+Original stock textures remain in use when class colors are disabled.

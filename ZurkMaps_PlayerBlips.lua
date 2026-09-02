@@ -3,6 +3,14 @@
 ZurkMapsPlayerBlips = ZurkMapsPlayerBlips or {}
 
 local PlayerBlips = ZurkMapsPlayerBlips
+local CLASS_BLIP_TEXTURE = "Interface\\AddOns\\ZurkMaps\\Media\\ClassPlayerDot"
+
+-- Approved rounded version remains saved as Media/ClassPlayerOrb.tga.
+local CLASS_ORB_TEXTURE = "Interface\\AddOns\\ZurkMaps\\Media\\ClassPlayerWarcraft"
+
+local function UseClassBlips()
+    return ZurkMapsOptions and ZurkMapsOptions.UseClassBlips()
+end
 
 local DEFAULT_CLASS_COLORS = {
     WARRIOR = { 0.78, 0.61, 0.43 },
@@ -50,13 +58,42 @@ function PlayerBlips.GetDotSize(baseSize, addonFrame)
     return baseSize / compensationScale
 end
 
-function PlayerBlips.ApplyRankBadge(blip, rankNumber, size)
+-- Neutral bright artwork retains the class hue while a raised rim and shaded
+-- lower edge add depth. Elite continues to use its original dot texture.
+function PlayerBlips.GetBlipClassColor(classToken)
+    local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
+    if color then return color.r, color.g, color.b end
+    local fallback = DEFAULT_CLASS_COLORS[classToken]
+    if fallback then return fallback[1], fallback[2], fallback[3] end
+    return 1, 1, 1
+end
+
+function PlayerBlips.ApplyTeammateColor(blip, classToken, isElite)
+    if UseClassBlips() and blip and blip.texture then
+        blip.texture:SetTexture(isElite and CLASS_BLIP_TEXTURE or CLASS_ORB_TEXTURE)
+        blip.texture:SetTexCoord(0, 1, 0, 1)
+        local r, g, b = PlayerBlips.GetBlipClassColor(classToken)
+        blip.texture:SetVertexColor(r, g, b, 1)
+    end
+end
+
+-- These textures recolor only the helmet. Their original backdrop, gold bar,
+-- silhouette and alpha remain intact; tinting the entire badge corrupts them.
+function PlayerBlips.GetRankBadgeTexture(rankNumber, classToken)
+    if UseClassBlips() and rankNumber and rankNumber >= 12 and rankNumber <= 14
+        and DEFAULT_CLASS_COLORS[classToken] then
+        return string.format("Interface\\AddOns\\ZurkMaps\\Media\\RankBadges\\Rank%d_%s", rankNumber, classToken)
+    end
+    return string.format("Interface\\PvPRankBadges\\PvPRank%02d", rankNumber)
+end
+
+function PlayerBlips.ApplyRankBadge(blip, rankNumber, size, classToken)
     if not blip or not rankNumber then
         return
     end
 
     blip:SetSize(size, size)
-    local rankTexture = string.format("Interface\\PvPRankBadges\\PvPRank%02d", rankNumber)
+    local rankTexture = PlayerBlips.GetRankBadgeTexture(rankNumber, classToken)
     if ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.HideEliteOverlay then
         ZurkMapsPlayerIcons.HideEliteOverlay(blip)
     end
@@ -462,13 +499,12 @@ function PlayerBlips.CreateRankController(config)
             return
         end
 
-        if hasReplacingAssignment or controller.GetRankNumber(unit) then
+        if hasReplacingAssignment or controller.GetRankNumber(unit) or UseClassBlips() then
             pcall(friendlyFrame.SetUnitColor, friendlyFrame, unit, 1, 1, 1, 0)
             return
         end
 
         local r, g, b = 1, 0.82, 0.16
-        if config.getClassColor then r, g, b = config.getClassColor(unit) end
         pcall(friendlyFrame.SetUnitColor, friendlyFrame, unit, r, g, b, 0.95)
     end
 
@@ -646,8 +682,10 @@ function PlayerBlips.CreateRankController(config)
 
         local rankNumber = controller.GetRankNumber(unit)
         if rankNumber then
-            return string.format("Interface\\PvPRankBadges\\PvPRank%02d", rankNumber), dotSize * controller.iconScale, nil, rankNumber
+            local _, classToken = UnitClass(unit)
+            return PlayerBlips.GetRankBadgeTexture(rankNumber, classToken), dotSize * controller.iconScale, nil, rankNumber
         end
+        if UseClassBlips() then return CLASS_ORB_TEXTURE, dotSize, nil, nil end
         return nil, nil, nil, nil
     end
 
@@ -761,10 +799,21 @@ function PlayerBlips.CreateRankController(config)
                             and ZurkMapsPlayerIcons.IsOverlayOnlyIcon(assignedIcon) then
                             -- Render both pieces of Elite in adjacent, topmost native
                             -- frames. The base remains a normal-sized gold player dot.
-                            pcall(eliteBase.AddUnit, eliteBase, unit, "Interface\\WorldMap\\WorldMapPartyIcon",
-                                dotSize, dotSize, 1.00, 0.82, 0.16, 1, 1, false)
+                            local baseTexture, r, g, b = "Interface\\WorldMap\\WorldMapPartyIcon", 1, 0.82, 0.16
+                            if UseClassBlips() then
+                                baseTexture = CLASS_BLIP_TEXTURE
+                                local _, classToken = UnitClass(unit)
+                                r, g, b = PlayerBlips.GetBlipClassColor(classToken)
+                            end
+                            pcall(eliteBase.AddUnit, eliteBase, unit, baseTexture,
+                                dotSize, dotSize, r, g, b, 1, 1, false)
                             pcall(elite.AddUnit, elite, unit, texture, size, size, 1.00, 0.95, 0.26, 1, 1, false)
                             eliteAdded = eliteAdded + 1
+                        elseif texture == CLASS_ORB_TEXTURE then
+                            local _, classToken = UnitClass(unit)
+                            local r, g, b = PlayerBlips.GetBlipClassColor(classToken)
+                            pcall(special.AddUnit, special, unit, texture, size, size, r, g, b, 1, 1, false)
+                            specialAdded = specialAdded + 1
                         else
                             pcall(shadow.AddUnit, shadow, unit, texture, size + 2, size + 2, 0, 0, 0, 0.72, 0, false)
                             pcall(special.AddUnit, special, unit, texture, size, size, 1, 1, 1, 1, 1, false)
@@ -811,8 +860,17 @@ function PlayerBlips.CreateRankController(config)
                                     assignedSize = dotSize
                                 end
                                 ZurkMapsPlayerIcons.ApplyAssignedIcon(blip, assignedIcon, assignedSize)
+                                if ZurkMapsPlayerIcons.IsOverlayOnlyIcon and ZurkMapsPlayerIcons.IsOverlayOnlyIcon(assignedIcon) then
+                                    local _, classToken = UnitClass(unit)
+                                    PlayerBlips.ApplyTeammateColor(blip, classToken, true)
+                                end
+                            elseif texture == CLASS_ORB_TEXTURE then
+                                PlayerBlips.ApplyGoldBlip(blip, size)
+                                local _, classToken = UnitClass(unit)
+                                PlayerBlips.ApplyTeammateColor(blip, classToken)
                             else
-                                PlayerBlips.ApplyRankBadge(blip, rankNumber, size)
+                                local _, classToken = UnitClass(unit)
+                                PlayerBlips.ApplyRankBadge(blip, rankNumber, size, classToken)
                             end
                             blip:ClearAllPoints()
                             blip:SetPoint("CENTER", friendlyFrame, "TOPLEFT", x * frameWidth, -(y * frameHeight))
@@ -959,7 +1017,8 @@ function ZurkMapsPlayerBlips.GetTooltipIconTagForUnit(unit, rankController)
 
     local rankNumber = rankController and rankController.GetRankNumber and rankController.GetRankNumber(unit) or nil
     if rankNumber then
-        return string.format([[|TInterface\PvPRankBadges\PvPRank%02d:14:14:0:0|t ]], rankNumber)
+        local _, classToken = UnitClass(unit)
+        return string.format("|T%s:14:14:0:0|t ", PlayerBlips.GetRankBadgeTexture(rankNumber, classToken))
     end
     return ""
 end
@@ -977,7 +1036,7 @@ function ZurkMapsPlayerBlips.GetTooltipIconTagForTestPlayer(agent)
     end
 
     if agent.pvpRankNumber and agent.pvpRankNumber >= 12 and agent.pvpRankNumber <= 14 then
-        return string.format([[|TInterface\PvPRankBadges\PvPRank%02d:14:14:0:0|t ]], agent.pvpRankNumber)
+        return string.format("|T%s:14:14:0:0|t ", PlayerBlips.GetRankBadgeTexture(agent.pvpRankNumber, agent.classToken))
     end
     return ""
 end

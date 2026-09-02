@@ -127,6 +127,7 @@ local function RestoreDockPoints(bar)
     if not bar then return end
     CaptureDock(bar)
     if bar._honorDockParent and bar.SetParent then bar:SetParent(bar._honorDockParent) end
+    bar:SetAlpha(1)
     if bar.SetScale then bar:SetScale(1) end
     bar:ClearAllPoints()
     for _, data in ipairs(bar._honorDockPoints or {}) do
@@ -219,6 +220,7 @@ local function PlacePersistentFromSaved(bar)
     if not bar then return end
     local state = EnsureState()
     if bar.SetParent then bar:SetParent(UIParent) end
+    bar:SetAlpha(ZurkMapsOptions and ZurkMapsOptions.GetFrameOpacity() or 1)
     if bar.SetScale then bar:SetScale(1) end
     bar:ClearAllPoints()
     bar:SetPoint(state.point or "CENTER", UIParent, state.relativePoint or state.point or "CENTER", tonumber(state.x) or 0, tonumber(state.y) or 0)
@@ -250,6 +252,7 @@ local function DetachPreservingPosition(bar)
     local screenHeight = math.max(1, (height * oldScale) / uiScale)
 
     if bar.SetParent then bar:SetParent(UIParent) end
+    bar:SetAlpha(ZurkMapsOptions and ZurkMapsOptions.GetFrameOpacity() or 1)
     if bar.SetScale then bar:SetScale(1) end
     bar:ClearAllPoints()
     if screenLeft and screenBottom then

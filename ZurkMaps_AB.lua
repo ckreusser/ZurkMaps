@@ -3216,9 +3216,12 @@ UpdateABTestBlips = function()
         elseif assignedIcon and ZurkMapsPlayerIcons.ApplyAssignedIcon then
             ZurkMapsPlayerIcons.ApplyAssignedIcon(blip, assignedIcon, dotSize * (ZurkMapsPlayerIcons.manualIconScale or 0.84))
         elseif agent.pvpRankNumber and agent.pvpRankNumber >= ZurkMapsABRank.min and agent.pvpRankNumber <= ZurkMapsABRank.max then
-            ZurkMapsPlayerBlips.ApplyRankBadge(blip, agent.pvpRankNumber, dotSize * ZurkMapsABRank.iconScale)
+            ZurkMapsPlayerBlips.ApplyRankBadge(blip, agent.pvpRankNumber, dotSize * ZurkMapsABRank.iconScale, agent.classToken)
         else
             ZurkMapsPlayerBlips.ApplyGoldBlip(blip, dotSize, AB_TEST_GOLD_R, AB_TEST_GOLD_G, AB_TEST_GOLD_B)
+        end
+        if (not assignedIcon or (ZurkMapsPlayerIcons.IsOverlayOnlyIcon and ZurkMapsPlayerIcons.IsOverlayOnlyIcon(assignedIcon))) and (assignedIcon or not agent.pvpRankNumber or agent.pvpRankNumber < ZurkMapsABRank.min or agent.pvpRankNumber > ZurkMapsABRank.max) then
+            ZurkMapsPlayerBlips.ApplyTeammateColor(blip, agent.classToken, eliteAssigned)
         end
         blip:ClearAllPoints()
         blip:SetPoint("CENTER", map, "TOPLEFT", agent.x * mapWidth, -(agent.y * mapHeight))
@@ -3821,6 +3824,9 @@ end
 
 if ZurkMapsOptions then
     ZurkMapsOptions.RegisterMap("AB", {
+        frame = frame,
+        mapTexture = mapTexture,
+        refreshBlips = function() ConfigureFriendlyPlayerDots(); if UpdateABTestBlips then UpdateABTestBlips() end end,
         title = "Arathi Basin",
         db = ZurksABCalloutMapDB,
         closeCommand = "hide",
@@ -3887,5 +3893,3 @@ frame:SetScript("OnEvent", function(self, event, ...)
         SaveLayout()
     end
 end)
-
-print("|cff33ff99Zurk Maps|r loaded. Type |cffffff00/ab|r for options.")
