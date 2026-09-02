@@ -2,7 +2,28 @@
 
 All notable changes to Zurk Maps will be documented in this file.
 
-## Unreleased
+## Zurk Maps 1.3.0-r7
+
+### Rank-up celebrations
+
+- Added a draggable rank-up popup with your character name, new rank title and icon, an animated golden glow, and a native red close button.
+- Honor breakpoint celebrations earned inside a battleground now wait until you leave, including breakpoints reached through end-of-match bonus honor.
+- Added a faction-colored honor bar that animates from the preceding breakpoint to the milestone that earns your new rank, using your actual breakpoint layout.
+- Completed segments become solid faction-colored metal; partial progress uses animated stripes. The moving indicator fades out over 0.5 seconds on arrival, and the rank-breakpoint glow settles after three seconds.
+- Improved automatic text sizing, centering, icon spacing, and popup borders. Rank titles are highlighted in the subtext without displaying rank numbers.
+- Added faction-specific rally text and a reminder that the new rank and Quartermaster purchasing privileges take effect after Tuesday's weekly reset.
+- Removed the temporary developer button.
+
+### Warsong Gulch
+
+- Expanded the Horde Ramp highlight and added a larger, separate mouseover/tooltip area.
+- Matched the Horde Ramp outline thickness to the other map regions.
+
+### Honor bars
+
+- Kept the live honor-progress indicator entirely inside the track on WSG, AB, and AV bars, including at full honor and in horizontal orientation.
+
+## 1.3.0-r6q
 
 ### Added
 

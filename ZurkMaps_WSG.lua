@@ -49,7 +49,11 @@ local ZONES = {
     { id="HORDE_ZERK_HUT", name="Horde Zerk Hut", message="EFC is at HORDE ZERK HUT!", points={ {30.000, 51.000}, {43.500, 51.000}, {45.000, 52.800}, {44.200, 56.200}, {43.700, 61.800}, {28.000, 62.500}, {28.000, 52.300} } },
     { id="HORDE_LEAF_HUT", name="Horde Leaf Hut", message="EFC is at HORDE LEAF HUT!", points={ {60.000, 52.800}, {75.000, 52.800}, {79.500, 56.400}, {79.000, 63.000}, {63.000, 61.800}, {61.700, 56.200} } },
     { id="HORDE_TUNNEL", name="Horde Tunnel", message="EFC is at HORDE TUNNEL!", points={ {45.000, 52.800}, {60.000, 52.800}, {61.700, 56.200}, {63.000, 61.800}, {53.400, 63.200}, {53.400, 73.400}, {48.800, 73.400}, {48.800, 63.200}, {43.700, 61.800}, {44.200, 56.200} } },
-    { id="HORDE_RAMP", name="Horde Ramp", message="EFC is at HORDE RAMP!", points={ {28.000, 62.500}, {43.700, 61.800}, {48.800, 63.200}, {48.800, 69.000}, {37.000, 69.000}, {35.000, 68.200} } },
+    -- The red highlight follows the ramp; the blue-reference hover envelope
+    -- adds a forgiving margin, especially around the western ramp approach.
+    { id="HORDE_RAMP", name="Horde Ramp", message="EFC is at HORDE RAMP!", drawPolygon=true,
+      points={ {22.000, 63.500}, {28.000, 62.500}, {43.700, 61.800}, {48.800, 63.200}, {48.800, 69.000}, {33.000, 69.500}, {30.000, 67.500}, {26.000, 65.500} },
+      hoverPoints={ {19.500, 62.800}, {31.000, 61.900}, {44.300, 61.500}, {46.200, 62.300}, {49.200, 62.600}, {49.400, 68.800}, {47.500, 69.400}, {36.700, 69.500}, {33.000, 70.000}, {30.000, 69.700}, {20.400, 66.900}, {18.500, 65.100}, {18.900, 63.600} } },
     { id="HORDE_GRAVEYARD", name="Horde Graveyard", message="EFC is at HORDE GRAVEYARD!", points={ {53.400, 63.200}, {63.000, 61.800}, {79.000, 63.000}, {79.000, 69.000}, {61.000, 69.000}, {53.400, 69.000} } },
     { id="HORDE_BANANA", name="Horde Banana", message="EFC is at HORDE BANANA!", points={ {37.000, 69.000}, {48.800, 69.000}, {48.800, 73.400}, {46.600, 74.800}, {39.200, 75.400}, {37.000, 73.600} } },
     { id="HORDE_SECOND_FLOOR", name="Horde Second Floor", message="EFC is at HORDE SECOND FLOOR!", points={ {48.800, 73.400}, {53.400, 73.400}, {53.400, 75.200}, {61.000, 75.200}, {61.000, 78.200}, {53.400, 78.200}, {53.400, 82.200}, {48.800, 82.200} } },
@@ -325,8 +329,88 @@ end)
 -- There is only one visible hotspot texture at a time.
 -- With no mouseover, this texture is hidden, so there are no visible
 -- boundaries, hotspot fills, or map labels.
-local highlightTexture = map:CreateTexture(nil, "ARTWORK")
+local highlightTexture = CreateFrame("Frame", nil, map)
 highlightTexture:SetAllPoints()
+highlightTexture:SetFrameLevel(map:GetFrameLevel())
+highlightTexture:EnableMouse(false)
+highlightTexture.texture = highlightTexture:CreateTexture(nil, "ARTWORK")
+highlightTexture.texture:SetAllPoints()
+highlightTexture.fills = {}
+highlightTexture.edges = {}
+
+-- Render the edited ramp directly from its polygon so the visual boundary and
+-- source geometry cannot diverge from a stale, pre-rendered highlight mask.
+function highlightTexture:SetZone(zone)
+    self.zone = zone
+    for _, fill in ipairs(self.fills) do fill:Hide() end
+    for _, edge in ipairs(self.edges) do edge:Hide() end
+    if not zone.drawPolygon then
+        self.texture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id)
+        self.texture:Show()
+        return
+    end
+    self.texture:Hide()
+    local width, height = self:GetWidth(), self:GetHeight()
+    if not width or not height or width <= 0 or height <= 0 then return end
+    local points, minY, maxY = zone.points, 100, 0
+    for _, point in ipairs(points) do
+        minY, maxY = math.min(minY, point[2]), math.max(maxY, point[2])
+    end
+    local rowHeight, used = 0.5, 0
+    local firstY, lastY = minY * height / 100, maxY * height / 100
+    for rowY = firstY, lastY - 0.001, rowHeight do
+        local h = math.min(rowHeight, lastY - rowY)
+        local sampleY = (rowY + h / 2) * 100 / height
+        local crossings = {}
+        local previous = points[#points]
+        for _, point in ipairs(points) do
+            if (point[2] > sampleY) ~= (previous[2] > sampleY) then
+                crossings[#crossings + 1] = point[1] + ((sampleY - point[2]) * (previous[1] - point[1]) / (previous[2] - point[2]))
+            end
+            previous = point
+        end
+        table.sort(crossings)
+        for index = 1, #crossings - 1, 2 do
+            used = used + 1
+            local fill = self.fills[used]
+            if not fill then
+                fill = self:CreateTexture(nil, "ARTWORK")
+                fill:SetColorTexture(245 / 255, 65 / 255, 65 / 255, 72 / 255)
+                if fill.SetSnapToPixelGrid then fill:SetSnapToPixelGrid(false) end
+                if fill.SetTexelSnappingBias then fill:SetTexelSnappingBias(0) end
+                self.fills[used] = fill
+            end
+            fill:ClearAllPoints()
+            fill:SetPoint("TOPLEFT", self, "TOPLEFT", crossings[index] * width / 100, -rowY)
+            fill:SetSize((crossings[index + 1] - crossings[index]) * width / 100, h)
+            fill:Show()
+        end
+    end
+    for index, point in ipairs(points) do
+        local nextPoint = points[(index % #points) + 1]
+        local edge = self.edges[index]
+        if not edge then
+            edge = self:CreateLine(nil, "OVERLAY")
+            edge:SetColorTexture(1, 105 / 255, 105 / 255, 235 / 255)
+            self.edges[index] = edge
+        end
+        -- Other region masks have a four-pixel outline on a 512x512 source,
+        -- stretched to this portrait map. Match that weight in each direction
+        -- instead of using a thinner, fixed-width runtime line.
+        local dx, dy = nextPoint[1] - point[1], nextPoint[2] - point[2]
+        local sourceLength = math.sqrt(dx * dx + dy * dy)
+        local displayLength = math.sqrt((dx * width) ^ 2 + (dy * height) ^ 2)
+        if displayLength > 0 then
+            edge:SetThickness(4 * width * height * sourceLength / (512 * displayLength))
+        end
+        edge:SetStartPoint("TOPLEFT", self, point[1] * width / 100, -point[2] * height / 100)
+        edge:SetEndPoint("TOPLEFT", self, nextPoint[1] * width / 100, -nextPoint[2] * height / 100)
+        edge:Show()
+    end
+end
+highlightTexture:SetScript("OnSizeChanged", function(self)
+    if self.zone and self.zone.drawPolygon then self:SetZone(self.zone) end
+end)
 highlightTexture:Hide()
 
 local function StartMove()
@@ -1212,8 +1296,7 @@ end)
 MakeChatButton("CAP", "CAP the flag NOW!!!", "TOPRIGHT", "BOTTOM")
 MakeChatButton("PICK", "PICK the flag ASAP!!!", "TOPLEFT", "BOTTOM")
 
--- Compact centered title plaque / move handle. It sits flush against the FC
--- pane with no gap and no overlap, so both pieces read as one frame assembly.
+-- Compact centered title plaque / move handle, tucked into the FC pane trim.
 local moveHandle = CreateFrame(
     "Frame",
     nil,
@@ -2727,9 +2810,17 @@ local function FindZone(x, y)
         return nil
     end
 
-    -- Top of Tunnel is the only intentional overlap and gets priority.
+    -- Nested Top of Tunnel areas retain first priority.
     for _, zone in ipairs(NESTED_ZONES) do
         if PointInEllipse(x, y, zone) then
+            return zone
+        end
+    end
+
+    -- Explicit hover envelopes take priority over neighboring region edges.
+    -- They affect only pointer interaction, not the visible highlight polygon.
+    for _, zone in ipairs(ZONES) do
+        if zone.hoverPoints and PointInPolygon(x, y, zone.hoverPoints) then
             return zone
         end
     end
@@ -2757,9 +2848,7 @@ local function ShowZone(zone)
     end
 
     -- Highlight only while the pointer is inside the hotspot.
-    highlightTexture:SetTexture(
-        "Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id
-    )
+    highlightTexture:SetZone(zone)
     highlightTexture:Show()
 
     -- Use Blizzard's normal tooltip placement (bottom-right by default)

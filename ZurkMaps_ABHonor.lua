@@ -615,6 +615,16 @@ function Honor.Create(parentFrame, addonFrame, mapHeight, config)
     bar.currentLine:SetWidth(12)
     bar.currentLine:SetVertexColor(1.0, 0.92, 0.55, 1)
 
+    -- Clip the live honor indicator to the same inner track as breakpoint ticks.
+    -- Anchoring the mask to the bar also handles resizing and either orientation.
+    if bar.CreateMaskTexture and bar.currentLine.AddMaskTexture then
+        bar.currentLineMask = bar:CreateMaskTexture(nil, "OVERLAY", nil, 5)
+        bar.currentLineMask:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -2)
+        bar.currentLineMask:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -2, 2)
+        bar.currentLineMask:SetTexture("Interface\\Buttons\\WHITE8X8", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        bar.currentLine:AddMaskTexture(bar.currentLineMask)
+    end
+
 
     bar.segments = {}
     for i = 1, 4 do
@@ -827,12 +837,15 @@ function Honor.Refresh(force)
 
     bar.currentLine:ClearAllPoints()
     if currentHonor > 0 then
+        -- Keep both halves of the one-unit line inside the track at 0% / 100%,
+        -- including on clients without texture masks.
+        local lineAxis = Clamp(2 + (innerLength * fillRatio), 2.5, 1.5 + innerLength)
         if horizontal then
-            bar.currentLine:SetSize(1, math.max(4, barHeight - 4))
-            bar.currentLine:SetPoint("CENTER", bar, "LEFT", 2 + (innerLength * fillRatio), 0)
+            bar.currentLine:SetSize(1, math.max(1, barHeight - 4))
+            bar.currentLine:SetPoint("CENTER", bar, "LEFT", lineAxis, 0)
         else
-            bar.currentLine:SetSize(math.max(4, barWidth - 4), 1)
-            bar.currentLine:SetPoint("CENTER", bar, "BOTTOM", 0, 2 + (innerLength * fillRatio))
+            bar.currentLine:SetSize(math.max(1, barWidth - 4), 1)
+            bar.currentLine:SetPoint("CENTER", bar, "BOTTOM", 0, lineAxis)
         end
         bar.currentLine:Show()
     else
