@@ -52,6 +52,7 @@ function Quick.Create(options)
         map = options.map,
         mapBorder = options.mapBorder,
         db = options.db or {},
+        messages = options.messages or {},
         width = options.width or 15,
         cellHeight = options.cellHeight or 18,
         count = 5,
@@ -66,18 +67,56 @@ function Quick.Create(options)
         maxEditorHeight = options.maxEditorHeight or 420,
     }
 
-    quick.db.avQuickMessages = quick.db.avQuickMessages or {}
+    -- Seed defaults only for slots that have never been saved. Existing strings,
+    -- including an intentionally empty string, belong to the user and must survive
+    -- addon updates unchanged. Slot 5 intentionally has no default.
+    local defaults = {
+        table.concat({
+            "/bg NORTH TO DWARF! Claim a job:",
+            "/bg V = Vann tank | L = left Marshals | R = right Marshals",
+            "/bg Honor NPCs 3-man team: T = tank | H = heals | D = DPS",
+            "/bg Mount up, ride North, bonk dwarf, get honor.",
+        }, "\n"),
+        table.concat({
+            "/bg STUMP CHECK! Do NOT try to ride through if they are at the stump",
+            "/bg Everyone dismount and wipe them and then resume NORTH TO DWARF together!",
+        }, "\n"),
+        "/bg They are back-capping. Watch flags and call out incs",
+        "/bg Mount up and PUSH to the flag from multiple angles. Don't just run into the meatgrinder",
+    }
+
+    function quick:LoadSavedMessages(messages, legacyMessages)
+        self.messages = type(messages) == "table" and messages or {}
+
+        -- Older builds kept these messages under the general AV database. Copy
+        -- existing strings once, without replacing anything already present in
+        -- the dedicated saved-variable table.
+        if type(legacyMessages) == "table" then
+            for slot = 1, self.count do
+                if self.messages[slot] == nil and type(legacyMessages[slot]) == "string" then
+                    self.messages[slot] = legacyMessages[slot]
+                end
+            end
+        end
+
+        for slot, defaultMessage in ipairs(defaults) do
+            if self.messages[slot] == nil then
+                self.messages[slot] = defaultMessage
+            end
+        end
+    end
+    quick:LoadSavedMessages(options.messages, options.legacyMessages)
     quick.maxLines = math.max(quick.minVisibleLines, math.floor((quick.maxEditorHeight - quick.baseEditorHeight) / quick.lineHeight) + quick.minVisibleLines)
 
 
     function quick:GetMessage(slot)
-        local value = self.db.avQuickMessages[slot]
+        local value = self.messages[slot]
         if type(value) == "string" then return value end
         return ""
     end
 
     function quick:SetMessage(slot, text)
-        self.db.avQuickMessages[slot] = tostring(text or "")
+        self.messages[slot] = tostring(text or "")
     end
 
     function quick:ResolveLine(line)

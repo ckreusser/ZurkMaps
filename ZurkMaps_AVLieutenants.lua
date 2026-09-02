@@ -22,19 +22,19 @@ local LIEUTENANTS = {
     { id=13296, key="LARGENT", name="Lieutenant Largent", faction="Alliance", kind="lieutenant", x=53.05, y=37.50,
       location="Stationed just outside Stonehearth Outpost with Greywand", calloutLocation="Stonehearth Outpost" },
     { id=13297, key="STOUTHANDLE", name="Lieutenant Stouthandle", faction="Alliance", kind="lieutenant", x=57.20, y=41.25,
-      location="Patrols the roads south of Stonehearth Graveyard toward Stonehearth Bunker", calloutLocation="south of Stonehearth GY",
-      routeLabel="Stonehearth Outpost <-> Stonehearth Bunker",
-      route={{52.3,39.6},{54.7,40.3},{57.2,41.2},{59.4,42.1},{61.6,43.0}} },
+      location="Patrols the lower roads directly north of Stonehearth Bunker", calloutLocation="directly north of Stonehearth Bunker",
+      routeLabel="Stonehearth Bunker lower north-road patrol",
+      route={{58.84,39.53},{57.87,39.81},{56.73,40.10},{56.55,40.37},{57.65,41.40},{58.67,41.75},{59.79,41.64},{60.68,41.79},{61.90,42.15},{62.96,42.40}} },
     { id=13298, key="GREYWAND", name="Lieutenant Greywand", faction="Alliance", kind="lieutenant", x=50.35, y=37.50,
       location="Stationed just outside Stonehearth Outpost with Largent", calloutLocation="Stonehearth Outpost" },
     { id=13299, key="LONADIN", name="Lieutenant Lonadin", faction="Alliance", kind="lieutenant", x=52.58, y=34.85,
-      location="Patrols the broad road above Stonehearth Outpost toward Stonehearth Graveyard", calloutLocation="road above Stonehearth Outpost",
-      routeLabel="Stonehearth Outpost -> Stonehearth Graveyard road",
-      route={{50.88,35.35},{51.68,35.10},{52.58,34.85},{53.63,34.55},{54.68,34.25},{55.68,34.00},{56.53,33.80}} },
+      location="Patrols between Icewing Bunker and Stonehearth Graveyard", calloutLocation="Icewing to Stonehearth GY road",
+      routeLabel="Icewing Bunker <-> Stonehearth Graveyard",
+      route={{58.51,31.91},{57.71,33.17},{56.95,33.80},{55.67,33.79},{53.76,34.40},{52.37,34.91},{50.81,35.17},{49.40,35.76}} },
     { id=13300, key="MANCUSO", name="Lieutenant Mancuso", faction="Alliance", kind="lieutenant", x=60.20, y=39.10,
       location="Patrols north of Stonehearth Bunker on the Stonehearth roads", calloutLocation="north of Stonehearth Bunker",
-      routeLabel="South Stonehearth Graveyard roads",
-      route={{59.3,35.7},{59.4,37.0},{59.8,38.4},{60.4,39.7},{61.1,41.0},{61.9,42.4}} },
+      routeLabel="Stonehearth Bunker upper hill patrol",
+      route={{60.20,39.10},{61.50,39.25},{63.04,39.57},{64.54,40.17},{66.86,42.17}} },
 
     -- Horde
     { id=13143, key="STRONGHOOF", name="Lieutenant Stronghoof", faction="Horde", kind="lieutenant", x=61.10, y=56.95,
@@ -44,17 +44,15 @@ local LIEUTENANTS = {
     { id=13145, key="GRUMMUS", name="Lieutenant Grummus", faction="Horde", kind="lieutenant", x=52.20, y=56.85,
       location="Patrols between Iceblood Garrison and Iceblood Graveyard", calloutLocation="Garrison to Iceblood GY",
       routeLabel="Iceblood Garrison <-> Iceblood Graveyard",
-      route={{46.8,55.9},{49.2,56.1},{51.4,56.6},{53.8,56.8},{56.2,57.0},{58.7,57.1}} },
+      route={{52.73,59.11},{53.36,58.98},{53.78,58.32},{54.39,58.01},{54.71,57.35},{54.00,56.80},{52.53,56.33},{51.04,55.66},{51.01,54.68},{50.50,54.03},{48.43,53.65},{47.49,53.36},{45.98,53.62}} },
     { id=13146, key="MURP", name="Lieutenant Murp", faction="Horde", kind="lieutenant", x=60.35, y=66.20,
       location="Patrols the main road southeast of Tower Point", calloutLocation="road southeast of Tower Point",
       routeLabel="Tower Point lower road patrol",
-      route={{59.15,64.15},{59.65,64.95},{60.05,65.75},{60.45,66.45},{61.05,67.05},{60.15,67.70},{59.25,68.00}} },
+      route={{54.90,64.59},{55.42,64.24},{56.27,64.06},{57.05,64.07},{58.30,64.21},{59.16,64.65},{59.69,65.19},{60.11,65.10},{59.58,64.59},{58.97,64.16},{58.02,63.87},{56.98,63.91},{56.16,63.80},{56.17,63.42},{56.77,62.97},{56.93,62.55},{57.43,62.25},{57.67,61.65}} },
     { id=13147, key="LEWIS", name="Lieutenant Lewis", faction="Horde", kind="lieutenant", x=44.60, y=55.45,
       location="Stationed above and right of Iceblood Garrison with Vol'talar", calloutLocation="upper-right of Iceblood Garrison" },
     { id=13137, key="RUGBA", name="Lieutenant Rugba", faction="Horde", kind="lieutenant", x=56.60, y=57.55,
-      location="Guards the west side of Iceblood Graveyard", calloutLocation="west of Iceblood GY",
-      routeLabel="Iceblood Graveyard west approach",
-      route={{55.7,57.0},{56.3,57.5},{57.0,58.0},{57.6,57.7},{57.1,57.1},{56.4,56.8}} },
+      location="Guards the west side of Iceblood Graveyard", calloutLocation="west of Iceblood GY" },
 
     -- Commanders also award bonus honor. These are the tower/bunker/graveyard honor NPCs
     -- that can easily be mistaken for lieutenants when looking at old AV maps.
@@ -68,7 +66,7 @@ local LIEUTENANTS = {
     { id=13318, key="MORTIMER", name="Commander Mortimer", faction="Alliance", kind="commander", x=38.80, y=14.65,
       location="Patrols Dun Baldar between the bunkers and Aid Station", calloutLocation="Dun Baldar",
       routeLabel="Dun Baldar bunker / Aid Station patrol",
-      route={{34.3,14.4},{36.8,14.0},{39.5,13.7},{41.3,14.3},{40.0,16.0},{37.6,16.7},{35.3,15.6},{34.3,14.4}} },
+      route={{39.39,16.68},{39.33,16.39},{38.45,15.90},{38.02,15.43},{38.68,15.24},{40.04,15.37},{39.67,15.03},{40.38,14.42},{41.11,14.57},{41.29,14.49}} },
 
     -- Horde
     { id=13140, key="DARDOSH", name="Commander Dardosh", faction="Horde", kind="commander", x=50.56, y=58.22,
@@ -107,6 +105,7 @@ LT.map = nil
 LT.mapBorder = nil
 LT.addonFrame = nil
 LT.config = nil
+LT.testMode = false
 LT.wasInAV = false
 LT.syncRequested = false
 LT.lastPositionBroadcast = LT.lastPositionBroadcast or {}
@@ -667,10 +666,9 @@ end
 
 local function ShowPath(info)
     if not info or not info.route or not info.pathWidgets then return end
-    -- The AV honor layer is intentionally enemy-only. Friendly honor NPC
-    -- status cannot be verified reliably from battleground state, so hiding
-    -- their blips/patrols avoids presenting stale information as authoritative.
-    if not IsEnemyHonorNPC(info) then
+    -- Live AV patrol overlays are enemy-only. Test mode deliberately exposes
+    -- both factions so every development route can be inspected in one session.
+    if not LT.testMode and not IsEnemyHonorNPC(info) then
         HidePath(info)
         return
     end
@@ -884,10 +882,10 @@ local function UpdateBlip(info)
     if not info or not info.blip or not LT.map then return end
     local state = EnsureState(info)
 
-    -- Display only enemy-faction honor NPCs. We still retain all tracked NPC
-    -- state internally so reset/sync parsing remains compatible, but friendly
-    -- Lieutenants, Commanders, Captains, and patrol widgets stay hidden.
-    if not IsEnemyHonorNPC(info) then
+    -- Live AV play displays only enemy-faction honor NPCs. AV test mode displays
+    -- both factions so every static blip and patrol corridor can be inspected
+    -- from either faction without changing the production behavior.
+    if not LT.testMode and not IsEnemyHonorNPC(info) then
         HidePath(info)
         info.blip:Hide()
         if info.healthBar then info.healthBar:Hide() end
@@ -2449,6 +2447,12 @@ function LT.RefreshScale()
             end
         end
     end
+end
+
+function LT.SetTestMode(flag)
+    LT.testMode = flag and true or false
+    for _, info in ipairs(LIEUTENANTS) do UpdateBlip(info) end
+    RefreshSecureTargetButtons()
 end
 
 local eventFrame=CreateFrame("Frame")

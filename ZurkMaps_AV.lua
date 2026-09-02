@@ -12,6 +12,7 @@ local MIN_SCALE, MAX_SCALE = 0.65, 2.00
 local DEFAULT_SCALE = 0.65
 
 ZurksAVCalloutMapDB = ZurksAVCalloutMapDB or {}
+ZurkMapsAVQuickMessagesDB = ZurkMapsAVQuickMessagesDB or {}
 if ZurksAVCalloutMapDB.showHonorBar == nil then ZurksAVCalloutMapDB.showHonorBar = true end
 
 local manualVisibility = nil
@@ -251,6 +252,8 @@ if ZurkMapsAVQuickMessages and ZurkMapsAVQuickMessages.Create then
         map = map,
         mapBorder = mapBorder,
         db = ZurksAVCalloutMapDB,
+        messages = ZurkMapsAVQuickMessagesDB,
+        legacyMessages = ZurksAVCalloutMapDB.avQuickMessages,
         width = 20,
         cellHeight = 21,
         isInBattleground = IsInBattlegroundInstance,
@@ -1424,6 +1427,7 @@ local function SetTestMode(flag)
         testPreviousManualVisibility=manualVisibility
         manualVisibility="show"
         avTestMode=true
+        if ZurkMapsAVLieutenants and ZurkMapsAVLieutenants.SetTestMode then ZurkMapsAVLieutenants.SetTestMode(true) end
         if friendlyPlayersFrame then friendlyPlayersFrame:Hide() end
         ClearTestHoverLock()
         ResetAVTestAgents()
@@ -1433,6 +1437,7 @@ local function SetTestMode(flag)
         UpdateLivePlayerHitButtons()
     else
         avTestMode=false
+        if ZurkMapsAVLieutenants and ZurkMapsAVLieutenants.SetTestMode then ZurkMapsAVLieutenants.SetTestMode(false) end
         ClearTestHoverLock()
         HideAVTestBlips()
         manualVisibility=testPreviousManualVisibility
@@ -1743,7 +1748,17 @@ end
 
 frame:RegisterEvent("ADDON_LOADED"); frame:RegisterEvent("PLAYER_ENTERING_WORLD"); frame:RegisterEvent("ZONE_CHANGED_NEW_AREA"); frame:RegisterEvent("ZONE_CHANGED"); frame:RegisterEvent("ZONE_CHANGED_INDOORS"); frame:RegisterEvent("UPDATE_BATTLEFIELD_SCORE"); frame:RegisterEvent("AREA_POIS_UPDATED")
 frame:SetScript("OnEvent", function(self,event,...)
-    if event=="ADDON_LOADED" then local loaded=...; if loaded==addonName then RestoreLayout(); ApplyHonorBarVisibility(); UpdateVisibility() end; return end
+    if event=="ADDON_LOADED" then
+        local loaded=...
+        if loaded==addonName then
+            ZurkMapsAVQuickMessagesDB=ZurkMapsAVQuickMessagesDB or {}
+            if avQuickMessages and avQuickMessages.LoadSavedMessages then
+                avQuickMessages:LoadSavedMessages(ZurkMapsAVQuickMessagesDB, ZurksAVCalloutMapDB.avQuickMessages)
+            end
+            RestoreLayout(); ApplyHonorBarVisibility(); UpdateVisibility()
+        end
+        return
+    end
     if event=="UPDATE_BATTLEFIELD_SCORE" or event=="AREA_POIS_UPDATED" then
         if IsInAlteracValley() then RefreshObjectives() end
         return
