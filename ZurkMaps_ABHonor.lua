@@ -1,5 +1,5 @@
 -- Zurk Maps weekly honor milestone bar.
--- Ranking calculations are adapted from the Ranker addon supplied during AVMap development.
+-- Credit: ranking calculations and milestone presentation are adapted from Ranker.
 ZurkMapsABHonor = ZurkMapsABHonor or {}
 
 local Honor = ZurkMapsABHonor
@@ -309,10 +309,10 @@ end
 local function GetConfiguredAverageHonor(limit)
     local bgName = GetEstimateBattleground()
     if ZurkMapsBGHistory and ZurkMapsBGHistory.GetAverageHonor then
-        return ZurkMapsBGHistory.GetAverageHonor(bgName, limit or 10)
+        return ZurkMapsBGHistory.GetAverageHonor(bgName, limit or 50)
     end
     if Honor.config and type(Honor.config.getAverageHonor) == "function" then
-        return Honor.config.getAverageHonor(limit or 10)
+        return Honor.config.getAverageHonor(limit or 50)
     end
     return nil, 0
 end
@@ -345,7 +345,7 @@ end
 
 local function GetMilestoneRunEstimate(state, milestone)
     local remaining = math.max(0, (tonumber(milestone.honor) or 0) - (tonumber(state.currentHonor) or 0))
-    local average, sampleCount = GetConfiguredAverageHonor(10)
+    local average, sampleCount = GetConfiguredAverageHonor(50)
     local runs = nil
     if average and average > 0 and sampleCount and sampleCount > 0 and remaining > 0 then
         runs = math.ceil(remaining / average)
@@ -833,7 +833,10 @@ function Honor.Refresh(force)
     local previousMilestoneRank = rank
     local iconSize = Clamp(thickness * 0.78, 6, 64)
     local markerSize = iconSize + 2
-    local tickLength = math.max(4, thickness - 4)
+    -- Keep non-rank breakpoint ticks one pixel inside the track at each end.
+    -- Fractional bar sizes otherwise let the one-pixel texture occasionally
+    -- snap just beyond the dark background.
+    local tickLength = math.max(4, thickness - 6)
     for i = 1, 4 do
         local marker = bar.markers[i]
         local milestone = milestones[i]
@@ -847,12 +850,12 @@ function Honor.Refresh(force)
                 marker:SetPoint("CENTER", bar, "LEFT", markerAxis, 0)
                 marker.tick:SetSize(1, tickLength)
                 marker.tick:ClearAllPoints()
-                marker.tick:SetPoint("CENTER", marker, "CENTER", 0, 0.5)
+                marker.tick:SetPoint("CENTER", marker, "CENTER", 0, 0)
             else
                 marker:SetPoint("CENTER", bar, "BOTTOM", 0, markerAxis)
                 marker.tick:SetSize(tickLength, 1)
                 marker.tick:ClearAllPoints()
-                marker.tick:SetPoint("CENTER", marker, "CENTER", 0.5, 0)
+                marker.tick:SetPoint("CENTER", marker, "CENTER", 0, 0)
             end
             marker.milestone = milestone
             marker.tick:SetVertexColor(0.82, 0.73, 0.56, 0.72)
@@ -996,4 +999,3 @@ end
 function Honor.GetSimulatedHonor()
     return tonumber(Honor.simulatedHonor) or 0
 end
-

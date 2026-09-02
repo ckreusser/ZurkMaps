@@ -70,7 +70,7 @@ function Quick.Create(options)
     -- Seed defaults only for slots that have never been saved. Existing strings,
     -- including an intentionally empty string, belong to the user and must survive
     -- addon updates unchanged. Slot 5 intentionally has no default.
-    local defaults = {
+    local hordeDefaults = {
         table.concat({
             "/bg NORTH TO DWARF! Claim a job:",
             "/bg V = Vann tank | L = left Marshals | R = right Marshals",
@@ -84,6 +84,23 @@ function Quick.Create(options)
         "/bg They are back-capping. Watch flags and call out incs",
         "/bg Mount up and PUSH to the flag from multiple angles. Don't just run into the meatgrinder",
     }
+    local allianceDefaults = {
+        table.concat({
+            "/bg SOUTH TO DREK! Claim a job:",
+            "/bg D = Drek tank | L = left Warmasters | R = right Warmasters",
+            "/bg Honor NPCs 3-man team: T = tank | H = heals | X = DPS",
+            "/bg Mount up, ride South, bonk Drek, get honor.",
+        }, "\n"),
+        table.concat({
+            "/bg STUMP CHECK! Do NOT try to ride through if they are at the stump",
+            "/bg Everyone dismount and wipe them and then resume SOUTH TO DREK together!",
+        }, "\n"),
+        "/bg They are back-capping. Watch flags and call out incs",
+        "/bg Mount up and PUSH to the flag from multiple angles. Don't just run into the meatgrinder",
+    }
+    local faction = UnitFactionGroup and UnitFactionGroup("player") or "Horde"
+    if faction ~= "Alliance" then faction = "Horde" end
+    local defaults = faction == "Alliance" and allianceDefaults or hordeDefaults
 
     function quick:LoadSavedMessages(messages, legacyMessages)
         self.messages = type(messages) == "table" and messages or {}
@@ -99,9 +116,28 @@ function Quick.Create(options)
             end
         end
 
+        self.db.avQuickMessageDefaultSeeds = type(self.db.avQuickMessageDefaultSeeds) == "table"
+            and self.db.avQuickMessageDefaultSeeds or {}
+        local seeds = self.db.avQuickMessageDefaultSeeds
         for slot, defaultMessage in ipairs(defaults) do
-            if self.messages[slot] == nil then
+            local current = self.messages[slot]
+            local previousSeed = seeds[slot]
+            if current == nil then
                 self.messages[slot] = defaultMessage
+                seeds[slot] = defaultMessage
+            elseif previousSeed ~= nil then
+                if current == previousSeed then
+                    -- Untouched defaults follow the current character's faction.
+                    self.messages[slot] = defaultMessage
+                    seeds[slot] = defaultMessage
+                else
+                    -- Once edited, the slot belongs entirely to the user.
+                    seeds[slot] = nil
+                end
+            elseif current == hordeDefaults[slot] or current == allianceDefaults[slot] then
+                -- Infer provenance for installs created before seed tracking existed.
+                self.messages[slot] = defaultMessage
+                seeds[slot] = defaultMessage
             end
         end
     end
@@ -117,6 +153,11 @@ function Quick.Create(options)
 
     function quick:SetMessage(slot, text)
         self.messages[slot] = tostring(text or "")
+        if self.db and type(self.db.avQuickMessageDefaultSeeds) == "table" then
+            -- Any explicit save makes this a user-owned slot, even if the user
+            -- enters a former default or intentionally leaves it blank.
+            self.db.avQuickMessageDefaultSeeds[slot] = nil
+        end
     end
 
     function quick:ResolveLine(line)

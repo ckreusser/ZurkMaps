@@ -114,7 +114,16 @@ function PlayerBlips.CreateRankController(config)
         inspectRosterUnits = {},
         seenGUIDs = {},
         eliteSeenGUIDs = {},
+        includeState = {},
     }
+
+    local function ShouldIncludeUnit(unit)
+        if type(config.shouldIncludeUnit) ~= "function" then
+            return true
+        end
+        local ok, included = pcall(config.shouldIncludeUnit, unit)
+        return not ok or included ~= false
+    end
 
     local pinSizes = {
         player = config.baseDotSize or 10,
@@ -432,6 +441,14 @@ function PlayerBlips.CreateRankController(config)
             return
         end
 
+        -- Some map-specific markers replace a normal roster dot while retaining
+        -- its native hover target. Keep that unit in Blizzard's position frame,
+        -- but make only its ordinary dot fully transparent.
+        if not ShouldIncludeUnit(unit) then
+            pcall(friendlyFrame.SetUnitColor, friendlyFrame, unit, 1, 1, 1, 0)
+            return
+        end
+
         local assignedIcon = ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.GetAssignedIconForUnit
             and ZurkMapsPlayerIcons.GetAssignedIconForUnit(unit) or nil
         local isEliteOverlay = assignedIcon and (ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.IsOverlayOnlyIcon and ZurkMapsPlayerIcons.IsOverlayOnlyIcon(assignedIcon))
@@ -675,7 +692,7 @@ function PlayerBlips.CreateRankController(config)
         local seenGUIDs = ClearTable(controller.eliteSeenGUIDs)
 
         for _, unit in ipairs(units) do
-            if UnitExists(unit) then
+            if UnitExists(unit) and ShouldIncludeUnit(unit) then
                 local guid = UnitGUID(unit)
                 local assignedIcon = ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.GetAssignedIconForUnit and ZurkMapsPlayerIcons.GetAssignedIconForUnit(unit) or nil
                 if guid and not seenGUIDs[guid] and assignedIcon and ZurkMapsPlayerIcons
@@ -731,7 +748,7 @@ function PlayerBlips.CreateRankController(config)
         local eliteAdded = 0
         local specialAdded = 0
         for _, unit in ipairs(units) do
-            if UnitExists(unit) then
+            if UnitExists(unit) and ShouldIncludeUnit(unit) then
                 local guid = UnitGUID(unit)
                 if guid and not seenGUIDs[guid] then
                     local texture, size, assignedIcon, rankNumber = controller.GetSpecialTextureAndSize(unit, dotSize)
@@ -778,7 +795,7 @@ function PlayerBlips.CreateRankController(config)
         local frameHeight = friendlyFrame:GetHeight() or (mapFrame and mapFrame:GetHeight()) or config.mapHeight or 400
 
         for _, unit in ipairs(units) do
-            if UnitExists(unit) then
+            if UnitExists(unit) and ShouldIncludeUnit(unit) then
                 local guid = UnitGUID(unit)
                 local texture, size, assignedIcon, rankNumber = controller.GetSpecialTextureAndSize(unit, dotSize)
                     ApplyUnitVisualState(unit, guid, rankNumber, assignedIcon)
@@ -817,6 +834,17 @@ function PlayerBlips.CreateRankController(config)
         local units = FillRosterUnits(controller.rosterUnits, true)
         local seenGUIDs = ClearTable(controller.seenGUIDs)
         local dotSize = config.getDotSize and config.getDotSize() or 10
+
+        -- Recolor only when a unit crosses the map-specific inclusion boundary.
+        -- In WSG this cleanly restores the previous carrier's dot and hides the
+        -- new carrier without rebuilding every player visual on every position tick.
+        for _, unit in ipairs(units) do
+            local included = ShouldIncludeUnit(unit)
+            if controller.includeState[unit] ~= included then
+                controller.includeState[unit] = included
+                controller.ColorFriendlyUnit(unit)
+            end
+        end
 
         -- Prefer the native UnitPositionFrame:AddUnit path. It avoids separately
         -- calculating positions for special icons and keeps them locked to the

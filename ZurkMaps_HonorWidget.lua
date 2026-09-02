@@ -1,4 +1,6 @@
 -- Shared honor-bar controller for WSG, AB, and AV.
+-- Credit: the action-button glow treatment is recreated from the WeakAuras /
+-- LibCustomGlow visual approach; Zurk Maps does not require either addon.
 -- One global state drives all three map-specific renderers so the Honor Bar
 -- behaves like one Zurk Maps feature instead of three independent widgets.
 ZurkMapsHonorWidget = ZurkMapsHonorWidget or {}
@@ -1135,4 +1137,3 @@ else
         Widget.RefreshShownHonorBars(false)
     end)
 end
-

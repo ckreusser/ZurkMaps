@@ -1,11 +1,13 @@
 -- Alterac Valley tracked-NPC status (lieutenants + commanders + captains + enemy general), distinct faction blips, patrol overlays, health sharing, reporting, and lightweight addon sync.
 -- Death detection uses COMBAT_LOG_EVENT_UNFILTERED / UNIT_DIED for the known AV honor-NPC IDs.
+-- Credit: Capping inspired the raid-target health scan and public AV health-feed
+-- compatibility. Zurk Maps uses its own state/sync protocol and only reads that feed.
 ZurkMapsAVLieutenants = ZurkMapsAVLieutenants or {}
 
 local LT = ZurkMapsAVLieutenants
 
 local PREFIX = "ZurkMapsAVLT"
-local CAPPING_PREFIX = "Capping" -- passive health interoperability; Zurk Maps never sends on this prefix
+local ZM_HEALTH_COMPAT_PREFIX = "Capping" -- external compatibility literal; never used for Zurk Maps transmissions
 local ALLIANCE_R, ALLIANCE_G, ALLIANCE_B = 0.18, 0.46, 0.95
 local HORDE_R, HORDE_G, HORDE_B = 0.78, 0.12, 0.10
 local PATH_ALPHA = 0.96
@@ -327,10 +329,10 @@ local function RegisterPrefix()
         -- Zurk Maps user can see remote boss health even when no Zurk Maps client
         -- near the NPC currently has a usable unit token. We never transmit with
         -- Capping's prefix.
-        pcall(C_ChatInfo.RegisterAddonMessagePrefix, CAPPING_PREFIX)
+        pcall(C_ChatInfo.RegisterAddonMessagePrefix, ZM_HEALTH_COMPAT_PREFIX)
     elseif type(RegisterAddonMessagePrefix) == "function" then
         pcall(RegisterAddonMessagePrefix, PREFIX)
-        pcall(RegisterAddonMessagePrefix, CAPPING_PREFIX)
+        pcall(RegisterAddonMessagePrefix, ZM_HEALTH_COMPAT_PREFIX)
     end
 end
 
@@ -1280,7 +1282,7 @@ local function ObserveUnit(unit, shouldBroadcast, skipMapPosition)
     return info
 end
 
--- Capping-style distributed tracked-NPC health observation. Classic exposes raid member
+-- Zurk Maps distributed tracked-NPC health observation. Classic exposes raid member
 -- targets as unit tokens even when the Zurk Maps user is nowhere near that NPC.
 -- Scanning raid1target..raid40target therefore lets one local client learn about
 -- a tracked AV NPC whenever any raid member is actively targeting it. The death
@@ -1383,7 +1385,7 @@ local function ScanRaidObservedHonorNPCHealth()
     if not IsInAlteracValley() then return end
     wipe(LT.healthScanBlocked)
 
-    -- Mirror Capping's low-hitch scan strategy: local/nameplate tokens first,
+    -- Use the credited low-hitch scan strategy: local/nameplate tokens first,
     -- then nameplate targets and all 40 raid-member targets on tiny staggered
     -- timers rather than doing the entire token set in one frame.
     ScanHealthUnitList(HEALTH_SCAN_UNITS_PRIMARY)
@@ -2487,8 +2489,8 @@ local function RunPeriodicMaintenance(step)
     LT.healthScanElapsed = (LT.healthScanElapsed or 0) + step
     RefreshNPCHealthBars()
 
-    -- Capping's AV health sharing works because it checks raid-member targets,
-    -- not just units visible to the local player. Do the same once per second so
+    -- Check raid-member targets, not just units visible to the local player.
+    -- Doing this once per second means
     -- a death seen through any raidXtarget becomes a Zurk Maps D: broadcast.
     if LT.healthScanElapsed >= 1.0 then
         LT.healthScanElapsed = 0
@@ -2561,7 +2563,7 @@ eventFrame:SetScript("OnEvent",function(_,event,...)
         if not IsInAlteracValley() then return end
         if prefix==PREFIX then
             HandleAddonMessage(message)
-        elseif prefix==CAPPING_PREFIX and channel=="INSTANCE_CHAT" and type(message)=="string" then
+        elseif prefix==ZM_HEALTH_COMPAT_PREFIX and channel=="INSTANCE_CHAT" and type(message)=="string" then
             -- Passive Capping interoperability. Its AV health feed uses exactly
             -- "npcID:percent"; unrelated Capping timer packets do not match.
             local idText,hpText=message:match("^(%d+):([%d%.%-]+)$")
@@ -2569,15 +2571,15 @@ eventFrame:SetScript("OnEvent",function(_,event,...)
             local hp=tonumber(hpText)
             if info and hp and hp==hp and hp>=0 and hp<=100 then
                 if hp<=0 then
-                    SetObservedHealth(info,0,"capping-health",false)
-                    MarkDead(info,"capping-health",false)
+                    SetObservedHealth(info,0,"zm-compat-health",false)
+                    MarkDead(info,"zm-compat-health",false)
                 else
                     local state=EnsureState(info)
                     if not state.dead then
-                        SetObservedHealth(info,hp,"capping-health",false)
+                        SetObservedHealth(info,hp,"zm-compat-health",false)
                     elseif state.source=="inferred" then
-                        RestoreAlive(info,"capping-health-alive",false)
-                        SetObservedHealth(info,hp,"capping-health",false)
+                        RestoreAlive(info,"zm-compat-health-alive",false)
+                        SetObservedHealth(info,hp,"zm-compat-health",false)
                     end
                 end
             end

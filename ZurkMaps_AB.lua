@@ -933,6 +933,10 @@ resizeHandle:RegisterForDrag("LeftButton")
 resizeHandle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 resizeHandle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 resizeHandle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+resizeHandle:GetNormalTexture():SetAlpha(0)
+resizeHandle:GetHighlightTexture():SetAlpha(0)
+resizeHandle:GetPushedTexture():SetAlpha(0)
+resizeHandle._gripAlpha = 0
 resizeHandle:SetScript("OnDragStart", BeginResize)
 resizeHandle:SetScript("OnDragStop", EndResize)
 resizeHandle:SetScript("OnMouseUp", EndResize)
@@ -950,7 +954,16 @@ end)
 resizeHandle:SetScript("OnLeave", function()
     GameTooltip:Hide()
 end)
-resizeHandle:SetScript("OnUpdate", function()
+resizeHandle:SetScript("OnUpdate", function(self, elapsed)
+    local gripTarget = (frame:IsShown() and frame:IsMouseOver()) and 1 or 0
+    if gripTarget > self._gripAlpha then
+        self._gripAlpha = math.min(1, self._gripAlpha + ((elapsed or 0) / 0.2))
+    elseif gripTarget < self._gripAlpha then
+        self._gripAlpha = math.max(0, self._gripAlpha - ((elapsed or 0) / 0.1))
+    end
+    self:GetNormalTexture():SetAlpha(self._gripAlpha)
+    self:GetHighlightTexture():SetAlpha(self._gripAlpha)
+    self:GetPushedTexture():SetAlpha(self._gripAlpha)
     if not resizing then
         return
     end

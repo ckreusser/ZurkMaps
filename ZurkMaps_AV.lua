@@ -226,8 +226,9 @@ if ZurkMapsBattlecry and ZurkMapsBattlecry.Create then
         frame = frame,
         map = map,
         mapBorder = mapBorder,
-        db = ZurksAVCalloutMapDB,
+        db = ZurkMapsAVQuickMessagesDB,
         dbKey = "battlecryMessage",
+        legacyMessage = ZurksAVCalloutMapDB.battlecryMessage,
         buttonSize = 33,
         xOffset = 7,
         yOffset = 7,
@@ -310,8 +311,8 @@ moveHandle.text:SetText("Zurk Maps")
 local objectiveButtons = {}
 
 
-local TOWER_FIRE_DURATION = 4.0
-local TOWER_FIRE_FRAME_TIME = 0.075
+local TOWER_FIRE_DURATION = 2.15
+local TOWER_FIRE_FRAME_TIME = 0.09
 local TOWER_FIRE_FRAMES = 8
 local TOWER_FIRE_SCALE = 1.475 -- 25% larger than the R5j fire treatment
 local TOWER_FIRE_Y_OFFSET = 0.42 -- fraction of the tower icon size; keeps the flame rooted in its upper half
@@ -371,7 +372,7 @@ local function ShowTowerHonorFloat(button, amount)
 
     local function Reanchor(offsetY)
         float:ClearAllPoints()
-        float:SetPoint("CENTER", button, "CENTER", 7, 7 + (offsetY or 0))
+        float:SetPoint("CENTER", button, "CENTER", 0, 8 + (offsetY or 0))
     end
     Reanchor(0)
 
@@ -404,55 +405,70 @@ local function EnsureTowerFireEffect(button)
     local texture = effect:CreateTexture(nil, "OVERLAY")
     texture:SetAllPoints(effect)
     texture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\AV_TowerFire")
-    texture:SetTexCoord(0, 1 / TOWER_FIRE_FRAMES, 0, 1)
+    texture:SetTexCoord(1 / 1024, (1 / TOWER_FIRE_FRAMES) - (1 / 1024), 0, 1)
     effect.texture = texture
     effect:Hide()
     button._zurkTowerFire = effect
     return effect
 end
 
-local function SizeTowerFireEffect(button)
+local function SizeTowerFireEffect(button, sizeMultiplier)
     if not button or not button._zurkTowerFire then return end
     local iconSize = button.icon and button.icon:GetWidth() or button.baseIconSize or 12
-    local size = math.max(12, iconSize * TOWER_FIRE_SCALE)
+    local fullSize = math.max(12, iconSize * TOWER_FIRE_SCALE)
+    local size = fullSize * (tonumber(sizeMultiplier) or 1)
     local effect = button._zurkTowerFire
     effect:SetSize(size, size)
     effect:ClearAllPoints()
-    effect:SetPoint("CENTER", button, "CENTER", 0, (iconSize * TOWER_FIRE_Y_OFFSET) + 3)
+    -- Anchor the root rather than the center. Size breathing now moves the flame's
+    -- top while the base remains planted on the tower marker.
+    effect:SetPoint("BOTTOM", button, "CENTER", 0, (iconSize * TOWER_FIRE_Y_OFFSET) + 3 - (fullSize * 0.5))
 end
 
-local function PlayTowerDestroyedEffect(objective)
+local function PlayTowerDestroyedEffect(objective, forceHonor)
     if not objective then return end
     local button = objectiveButtons[objective.id]
     if not button then return end
     local effect = EnsureTowerFireEffect(button)
     if not effect then return end
-    SizeTowerFireEffect(button)
+    SizeTowerFireEffect(button, 0.62)
     effect.elapsed = 0
-    effect.frameElapsed = 0
-    effect.frameIndex = 0
-    effect:SetAlpha(1)
-    effect.texture:SetTexCoord(0, 1 / TOWER_FIRE_FRAMES, 0, 1)
+    effect.frameIndex = -1
+    effect:SetAlpha(0.68)
+    effect.texture:SetTexCoord(1 / 1024, (1 / TOWER_FIRE_FRAMES) - (1 / 1024), 0, 1)
+    effect.texture:SetAlpha(1)
     effect:Show()
     effect:SetScript("OnUpdate", function(self, elapsed)
         self.elapsed = (self.elapsed or 0) + (elapsed or 0)
-        self.frameElapsed = (self.frameElapsed or 0) + (elapsed or 0)
-        while self.frameElapsed >= TOWER_FIRE_FRAME_TIME do
-            self.frameElapsed = self.frameElapsed - TOWER_FIRE_FRAME_TIME
-            self.frameIndex = ((self.frameIndex or 0) + 1) % TOWER_FIRE_FRAMES
+        local frameIndex = math.floor(self.elapsed / TOWER_FIRE_FRAME_TIME) % TOWER_FIRE_FRAMES
+        if frameIndex ~= self.frameIndex then
+            self.frameIndex = frameIndex
+            local left = (frameIndex / TOWER_FIRE_FRAMES) + (1 / 1024)
+            self.texture:SetTexCoord(left, ((frameIndex + 1) / TOWER_FIRE_FRAMES) - (1 / 1024), 0, 1)
         end
-        local left = self.frameIndex / TOWER_FIRE_FRAMES
-        self.texture:SetTexCoord(left, left + (1 / TOWER_FIRE_FRAMES), 0, 1)
-        if self.elapsed > (TOWER_FIRE_DURATION - 0.45) then
-            self:SetAlpha(math.max(0, (TOWER_FIRE_DURATION - self.elapsed) / 0.45))
+        local whoosh = math.min(1, self.elapsed / 0.34)
+        local easedWhoosh = 1 - ((1 - whoosh) * (1 - whoosh) * (1 - whoosh))
+        local sizeMultiplier = 0.62 + (0.46 * easedWhoosh)
+        if whoosh >= 1 then
+            local settle = math.min(1, (self.elapsed - 0.34) / 0.30)
+            sizeMultiplier = 1.08 - (0.08 * settle)
+                + (math.sin((self.elapsed - 0.34) * math.pi * 4.4) * 0.045 * settle)
         end
+        local intensity = 0.68 + (0.32 * easedWhoosh)
+        if self.elapsed > (TOWER_FIRE_DURATION - 0.32) then
+            local fade = math.max(0, (TOWER_FIRE_DURATION - self.elapsed) / 0.32)
+            sizeMultiplier = sizeMultiplier * (0.78 + (0.22 * fade))
+            intensity = intensity * fade
+        end
+        SizeTowerFireEffect(button, sizeMultiplier)
+        self:SetAlpha(intensity)
         if self.elapsed >= TOWER_FIRE_DURATION then
             self:SetScript("OnUpdate", nil)
             self:Hide()
         end
     end)
 
-    if IsEnemyAVTower(objective) then
+    if forceHonor or IsEnemyAVTower(objective) then
         if C_Timer and C_Timer.After then
             C_Timer.After(0.18, function() ShowTowerHonorFloat(button, TOWER_DESTROY_HONOR) end)
         else
@@ -566,6 +582,7 @@ local function EndResize() if resizing then resizing=false; SaveLayout() end end
 local resizeHandle=CreateFrame("Button", nil, map)
 resizeHandle:SetSize(22,22); resizeHandle:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", -1,1); resizeHandle:SetFrameLevel(mapBorder:GetFrameLevel()+2); resizeHandle:RegisterForDrag("LeftButton")
 resizeHandle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up"); resizeHandle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight"); resizeHandle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+resizeHandle:GetNormalTexture():SetAlpha(0); resizeHandle:GetHighlightTexture():SetAlpha(0); resizeHandle:GetPushedTexture():SetAlpha(0); resizeHandle._gripAlpha=0
 resizeHandle:SetScript("OnDragStart", BeginResize); resizeHandle:SetScript("OnDragStop", EndResize); resizeHandle:SetScript("OnMouseUp", EndResize)
 resizeHandle:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(UIParent, "ANCHOR_NONE")
@@ -579,7 +596,10 @@ resizeHandle:SetScript("OnEnter", function(self)
     GameTooltip:Show()
 end)
 resizeHandle:SetScript("OnLeave", function() GameTooltip:Hide() end)
-resizeHandle:SetScript("OnUpdate", function()
+resizeHandle:SetScript("OnUpdate", function(self, elapsed)
+    local gripTarget=(frame:IsShown() and frame:IsMouseOver()) and 1 or 0
+    if gripTarget>self._gripAlpha then self._gripAlpha=math.min(1,self._gripAlpha+((elapsed or 0)/0.2)) elseif gripTarget<self._gripAlpha then self._gripAlpha=math.max(0,self._gripAlpha-((elapsed or 0)/0.1)) end
+    self:GetNormalTexture():SetAlpha(self._gripAlpha); self:GetHighlightTexture():SetAlpha(self._gripAlpha); self:GetPushedTexture():SetAlpha(self._gripAlpha)
     if not resizing then return end
     local x,y=GetCursorUIPosition(); local dx=x-resizeStartX; local dy=resizeStartY-y
     local sx=resizeStartScale+(dx/MAP_WIDTH); local sy=resizeStartScale+(dy/MAP_HEIGHT); local newScale=(sx+sy)/2
@@ -698,6 +718,7 @@ local friendlyPlayersElapsed = 0
 local hoveredFriendlyPlayersSignature = nil
 local avTestMode = false
 local testPreviousManualVisibility = nil
+local avObjectiveTimers
 
 local function GetAVUiMapID()
     if C_Map and type(C_Map.GetBestMapForUnit) == "function" then
@@ -1437,6 +1458,7 @@ local function SetTestMode(flag)
         UpdateLivePlayerHitButtons()
     else
         avTestMode=false
+        if avObjectiveTimers and avObjectiveTimers.StopTest then avObjectiveTimers:StopTest() end
         if ZurkMapsAVLieutenants and ZurkMapsAVLieutenants.SetTestMode then ZurkMapsAVLieutenants.SetTestMode(false) end
         ClearTestHoverLock()
         HideAVTestBlips()
@@ -1513,7 +1535,9 @@ for _, objective in ipairs(OBJECTIVES) do
     objective.currentTexture=objective.defaultTexture; objective.status=objective.initialStatus or "Initial control"
     ApplyObjectiveTexture(button.icon, objective, objective.defaultTexture)
     button:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:SetText(objective.name); GameTooltip:AddLine(objective.status or "Objective",0.82,0.82,0.82,true); GameTooltip:Show()
+        GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:SetText(objective.name); GameTooltip:AddLine(objective.status or "Objective",0.82,0.82,0.82,true)
+        if avObjectiveTimers and avObjectiveTimers.AddTooltipLines then avObjectiveTimers:AddTooltipLines(objective,GameTooltip) end
+        GameTooltip:Show()
     end)
     button:SetScript("OnLeave", function() GameTooltip:Hide() end)
     button:RegisterForClicks("RightButtonUp")
@@ -1531,6 +1555,32 @@ for _, objective in ipairs(OBJECTIVES) do
 end
 UpdateObjectiveScale()
 
+if ZurkMapsAVTimers and ZurkMapsAVTimers.Create then
+    avObjectiveTimers=ZurkMapsAVTimers.Create({
+        map=map,
+        mapBorder=mapBorder,
+        objectives=OBJECTIVES,
+        buttons=objectiveButtons,
+        isInAlteracValley=IsInAlteracValley,
+        getPlayerFaction=function() return UnitFactionGroup and UnitFactionGroup("player") or nil end,
+        getCalloutChannel=function()
+            if ZurkMapsOptions and ZurkMapsOptions.GetCalloutChannel then return ZurkMapsOptions.GetCalloutChannel("AV") end
+            return "BG"
+        end,
+        sendCallout=function(message)
+            if ZurkMapsOptions and ZurkMapsOptions.SendCallout then
+                ZurkMapsOptions.SendCallout("AV",message)
+            else
+                local chatType=IsInBattlegroundInstance() and "INSTANCE_CHAT" or "SAY"
+                SendChatCompat(message,chatType)
+            end
+        end,
+        onTestTowerComplete=function(objective)
+            PlayTowerDestroyedEffect(objective,true)
+        end,
+    })
+end
+
 local function ResetObjectivesToInitial()
     for _, objective in ipairs(OBJECTIVES) do
         objective.currentTexture=objective.defaultTexture
@@ -1543,6 +1593,7 @@ local function ResetObjectivesToInitial()
         end
         ApplyObjectiveTexture(objectiveButtons[objective.id].icon, objective, objective.defaultTexture)
     end
+    if avObjectiveTimers and avObjectiveTimers.Reset then avObjectiveTimers:Reset() end
 end
 
 local function GetAVObjectiveStatusLabel(objective, textureIndex, description)
@@ -1560,7 +1611,7 @@ local function GetAVObjectiveStatusLabel(objective, textureIndex, description)
     return objective and objective.status or "Objective"
 end
 
-local function ApplyLiveObjectiveState(objective, textureIndex, description)
+local function ApplyLiveObjectiveState(objective, textureIndex, description, areaPoiID)
     if not objective then return false end
     textureIndex=tonumber(textureIndex)
     if not textureIndex then return false end
@@ -1580,6 +1631,9 @@ local function ApplyLiveObjectiveState(objective, textureIndex, description)
     local button=objectiveButtons[objective.id]
     if button and button.icon then
         ApplyObjectiveTexture(button.icon, objective, textureIndex)
+    end
+    if avObjectiveTimers and avObjectiveTimers.ObserveObjective then
+        avObjectiveTimers:ObserveObjective(objective, textureIndex, areaPoiID)
     end
     return true
 end
@@ -1640,7 +1694,7 @@ local function RefreshObjectives()
                 if okInfo and type(info)=="table" then
                     local objective=FindObjective(info.name)
                     if objective then
-                        ApplyLiveObjectiveState(objective, info.textureIndex, info.description)
+                        ApplyLiveObjectiveState(objective, info.textureIndex, info.description, info.areaPoiID or poiID)
                         local mapX,mapY=GetAVVectorPositionXY(info.position)
                         AddCalibrationSample(objective,mapX,mapY)
                     end
@@ -1719,9 +1773,13 @@ SlashCmdList["AVCALLOUTS"]=function(msg)
     elseif msg=="hide" then manualVisibility="hide"; UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV map hidden.")
     elseif msg=="reset" then ResetLayout(); print("|cff33ff99Zurk Maps|r AV position and size reset.")
     elseif msg=="refresh" then RefreshObjectives(); print("|cff33ff99Zurk Maps|r AV objectives refreshed.")
+    elseif msg=="test timers" then
+        SetTestMode(true)
+        if avObjectiveTimers and avObjectiveTimers.StartTest then avObjectiveTimers:StartTest() end
+        UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV objective timer test started.")
     elseif msg=="test" then SetTestMode(true); UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV test mode enabled.")
     elseif msg=="test off" or msg=="test clear" then SetTestMode(false); UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV test mode disabled.")
-    else print("|cff33ff99Zurk Maps|r AV commands: |cffffff00/av show|r, |cffffff00/av hide|r, |cffffff00/av reset|r, |cffffff00/av refresh|r, |cffffff00/av test|r, |cffffff00/av test off|r") end
+    else print("|cff33ff99Zurk Maps|r AV commands: |cffffff00/av show|r, |cffffff00/av hide|r, |cffffff00/av reset|r, |cffffff00/av refresh|r, |cffffff00/av test|r, |cffffff00/av test timers|r, |cffffff00/av test off|r") end
 end
 
 if ZurkMapsOptions then
@@ -1740,6 +1798,7 @@ if ZurkMapsOptions then
         commands={
             {label="Hide Map",command="hide"},
             {label="Reset Position & Size",command="reset"},
+            {label="Test Objective Timers",command="test timers"},
             {label="Start Test",command="test"},
             {label="Stop Test",command="test off"},
         }
@@ -1752,6 +1811,9 @@ frame:SetScript("OnEvent", function(self,event,...)
         local loaded=...
         if loaded==addonName then
             ZurkMapsAVQuickMessagesDB=ZurkMapsAVQuickMessagesDB or {}
+            if avBattlecry and avBattlecry.LoadSavedMessage then
+                avBattlecry:LoadSavedMessage(ZurkMapsAVQuickMessagesDB, ZurksAVCalloutMapDB.battlecryMessage)
+            end
             if avQuickMessages and avQuickMessages.LoadSavedMessages then
                 avQuickMessages:LoadSavedMessages(ZurkMapsAVQuickMessagesDB, ZurksAVCalloutMapDB.avQuickMessages)
             end

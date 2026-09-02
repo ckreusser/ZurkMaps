@@ -1,4 +1,6 @@
 local addonName = ...
+-- Credit: the friendly flag-carrier silhouette glow adapts the WeakAuras /
+-- LibCustomGlow visual approach without requiring either addon.
 
 local MAP_WIDTH = 330
 local MAP_HEIGHT = 440
@@ -140,11 +142,11 @@ if ZurkMapsWSGHonor and ZurkMapsWSGHonor.Create then
 
     if wsgHonorBar then
         -- Top: stop at the top edge of the FC pane; do not climb into the
-        -- Zurk Maps title plaque. Bottom: extend two pixels below the
-        -- CAP/PICK row so the left edge visually finishes with the buttons.
+        -- Zurk Maps title plaque. Bottom: finish exactly with the CAP/PICK row
+        -- so the Honor Bar and map assembly share one continuous baseline.
         wsgHonorBar:ClearAllPoints()
         wsgHonorBar:SetPoint("TOPRIGHT", frame, "TOPLEFT", 1, -MOVE_HANDLE_HEIGHT)
-        wsgHonorBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", 1, -1)
+        wsgHonorBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", 1, 0)
         if ZurkMapsHonorWidget and ZurkMapsHonorWidget.Attach then
             ZurkMapsHonorWidget.Attach(wsgHonorBar, ZurkMapsWSGHonor, { mapKey = "WSG", mapFrame = frame })
         end
@@ -267,6 +269,10 @@ resizeHandle:RegisterForDrag("LeftButton")
 resizeHandle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 resizeHandle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 resizeHandle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+resizeHandle:GetNormalTexture():SetAlpha(0)
+resizeHandle:GetHighlightTexture():SetAlpha(0)
+resizeHandle:GetPushedTexture():SetAlpha(0)
+resizeHandle._gripAlpha = 0
 
 resizeHandle:SetScript("OnDragStart", BeginResize)
 resizeHandle:SetScript("OnDragStop", EndResize)
@@ -288,7 +294,16 @@ resizeHandle:SetScript("OnLeave", function()
     GameTooltip:Hide()
 end)
 
-resizeHandle:SetScript("OnUpdate", function()
+resizeHandle:SetScript("OnUpdate", function(self, elapsed)
+    local gripTarget = (frame:IsShown() and frame:IsMouseOver()) and 1 or 0
+    if gripTarget > self._gripAlpha then
+        self._gripAlpha = math.min(1, self._gripAlpha + ((elapsed or 0) / 0.2))
+    elseif gripTarget < self._gripAlpha then
+        self._gripAlpha = math.max(0, self._gripAlpha - ((elapsed or 0) / 0.1))
+    end
+    self:GetNormalTexture():SetAlpha(self._gripAlpha)
+    self:GetHighlightTexture():SetAlpha(self._gripAlpha)
+    self:GetPushedTexture():SetAlpha(self._gripAlpha)
     if not resizing then
         return
     end
@@ -350,6 +365,33 @@ map:SetScript("OnDragStop", StopMove)
 
 local ROW_WIDTH = MAP_WIDTH + 10
 local HALF_ACTION_WIDTH = ROW_WIDTH / 2
+
+-- One shared container joins CAP/PICK to the map border without stacking a
+-- second tooltip border around each already-framed GameMenuButton.
+frame.actionRow = CreateFrame(
+    "Frame",
+    nil,
+    frame,
+    BackdropTemplateMixin and "BackdropTemplate" or nil
+)
+frame.actionRow:SetSize(ROW_WIDTH, ACTION_HEIGHT)
+-- The tooltip border frame extends five pixels below the map artwork. Pull the
+-- action row through that transparent padding so the two visible edges touch.
+frame.actionRow:SetPoint("TOP", mapBorder, "BOTTOM", 0, 5)
+frame.actionRow:SetFrameLevel(mapBorder:GetFrameLevel() + 1)
+frame.actionRow:EnableMouse(false)
+if frame.actionRow.SetBackdrop then
+    frame.actionRow:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true,
+        tileSize = 16,
+        edgeSize = 12,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    frame.actionRow:SetBackdropColor(0.035, 0.022, 0.014, 0.94)
+    frame.actionRow:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 0.98)
+end
 
 local allianceFlagCarrier = nil
 local hordeFlagCarrier = nil
@@ -725,33 +767,18 @@ local CARRIER_ROW_SEPARATOR_WIDTH = 2
 local CARRIER_FRAME_WIDTH = math.floor((ROW_WIDTH - (CARRIER_ROW_INSET * 2) - CARRIER_ROW_SEPARATOR_WIDTH) / 2)
 
 local function MakeChatButton(text, message, point, relativePoint)
-    local button = CreateFrame("Button", nil, frame, "GameMenuButtonTemplate")
-    button:SetSize(HALF_ACTION_WIDTH, ACTION_HEIGHT)
-    button:SetPoint(point, map, relativePoint, 0, 0)
+    local button = CreateFrame("Button", nil, frame.actionRow, "GameMenuButtonTemplate")
+    button:SetSize(HALF_ACTION_WIDTH - 4, ACTION_HEIGHT - 6)
+    if point == "TOPRIGHT" then
+        button:SetPoint("LEFT", frame.actionRow, "LEFT", 3, 0)
+    else
+        button:SetPoint("RIGHT", frame.actionRow, "RIGHT", -3, 0)
+    end
     button:SetText(text)
     button:RegisterForClicks("LeftButtonUp")
     button:SetScript("OnClick", function()
         Report(message)
     end)
-
-    local buttonBorder = CreateFrame(
-        "Frame",
-        nil,
-        button,
-        BackdropTemplateMixin and "BackdropTemplate" or nil
-    )
-    buttonBorder:SetPoint("TOPLEFT", button, "TOPLEFT", -1, 1)
-    buttonBorder:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 1, -1)
-    if buttonBorder.SetBackdrop then
-        buttonBorder:SetBackdrop({
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            edgeSize = 12,
-        })
-        buttonBorder:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 0.98)
-    end
-    buttonBorder:EnableMouse(false)
-    buttonBorder:SetFrameLevel(button:GetFrameLevel() + 3)
-    button.borderFrame = buttonBorder
 
     return button
 end
@@ -813,15 +840,109 @@ local function MakeCarrierFrame(isFriendly, point, relativePoint)
     iconFrame:SetSize(29, 29)
     iconFrame:SetPoint(isFriendly and "LEFT" or "RIGHT", button, isFriendly and "LEFT" or "RIGHT", isFriendly and 3 or -3, 0)
     iconFrame:SetFrameLevel(button:GetFrameLevel() + 2)
+    if iconFrame.SetClipsChildren then iconFrame:SetClipsChildren(true) end
 
-    local glow = iconFrame:CreateTexture(nil, "BACKGROUND")
-    glow:SetPoint("TOPLEFT", iconFrame, "TOPLEFT", -2, 2)
-    glow:SetPoint("BOTTOMRIGHT", iconFrame, "BOTTOMRIGHT", 2, -2)
     local flagToken = GetCarrierFlagToken(isFriendly)
-    if flagToken == "AllianceFlag" then
-        glow:SetColorTexture(0.18, 0.55, 1.0, 0.14)
+    local glow = CreateFrame("Frame", nil, button)
+    glow:SetAllPoints(iconFrame)
+    glow:SetFrameLevel(button:GetFrameLevel() + 1)
+    glow:EnableMouse(false)
+    if glow.SetClipsChildren then glow:SetClipsChildren(true) end
+    if isFriendly then
+        glow.elapsed = 0
+        glow.rearStar = glow:CreateTexture(nil, "ARTWORK", nil, -2)
+        glow.rearStar:SetPoint("CENTER")
+        glow.rearStar:SetTexture("Interface\\Cooldown\\star4")
+        glow.rearStar:SetBlendMode("ADD")
+        glow.rearStar:SetVertexColor(1.00, 0.78, 0.08, 1)
+        glow.innerStar = glow:CreateTexture(nil, "ARTWORK", nil, -1)
+        glow.innerStar:SetPoint("CENTER")
+        glow.innerStar:SetTexture("Interface\\Cooldown\\star4")
+        glow.innerStar:SetBlendMode("ADD")
+        glow.innerStar:SetVertexColor(1.00, 1.00, 0.68, 1)
+        glow:SetScript("OnUpdate", function(self, elapsed)
+            self.elapsed = (self.elapsed or 0) + elapsed
+            local rearPulse = 0.5 + (0.5 * math.sin(self.elapsed * 4.2))
+            local innerPulse = 0.5 + (0.5 * math.sin((self.elapsed * 4.2) + (math.pi * 0.72)))
+            self.rearStar:SetSize(32 + (4 * rearPulse), 32 + (4 * rearPulse))
+            self.rearStar:SetAlpha(0.34 + (0.20 * rearPulse))
+            self.innerStar:SetSize(28 + (3 * innerPulse), 28 + (3 * innerPulse))
+            self.innerStar:SetAlpha(0.28 + (0.16 * innerPulse))
+            if self.rearStar.SetRotation then self.rearStar:SetRotation(self.elapsed * 0.75) end
+            if self.innerStar.SetRotation then self.innerStar:SetRotation(self.elapsed * -1.05) end
+        end)
     else
-        glow:SetColorTexture(1.0, 0.16, 0.10, 0.14)
+        glow.fill = glow:CreateTexture(nil, "BACKGROUND")
+        glow.fill:SetAllPoints()
+        if flagToken == "AllianceFlag" then
+            glow.fill:SetColorTexture(0.18, 0.55, 1.0, 0.05)
+        else
+            glow.fill:SetColorTexture(1.0, 0.16, 0.10, 0.05)
+        end
+        glow.flameElapsed = 0
+        glow.flameFrame = -1
+        glow.flame = glow:CreateTexture(nil, "ARTWORK", nil, -1)
+        glow.flame:SetPoint("CENTER", glow, "CENTER", -2, -1)
+        glow.flame:SetSize(36, 40)
+        glow.flame:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\AV_TowerFire")
+        glow.flame:SetTexCoord(1 / 1024, (1 / 8) - (1 / 1024), 0, 1)
+        glow.flame:SetBlendMode("ADD")
+        glow.flame:SetAlpha(0.32)
+        if glow.CreateMaskTexture and glow.flame.AddMaskTexture then
+            -- A dim, slightly larger copy feathers the silhouette beyond the
+            -- primary mask. Layering it behind the flame softens the visible
+            -- lower cup without widening the bright core.
+            glow.flameSoft = glow:CreateTexture(nil, "ARTWORK", nil, -2)
+            glow.flameSoft:SetPoint("CENTER", glow, "CENTER", -2, -1)
+            glow.flameSoft:SetSize(40, 44)
+            glow.flameSoft:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\AV_TowerFire")
+            glow.flameSoft:SetTexCoord(1 / 1024, (1 / 8) - (1 / 1024), 0, 1)
+            glow.flameSoft:SetBlendMode("ADD")
+            glow.flameSoft:SetAlpha(0.08)
+            glow.flameSoftMask = glow:CreateMaskTexture(nil, "ARTWORK", nil, -1)
+            glow.flameSoftMask:SetPoint("CENTER", glow, "CENTER", -2, 1)
+            glow.flameSoftMask:SetSize(27, 33)
+            glow.flameSoftMask:SetTexture(
+                "Interface\\CharacterFrame\\TempPortraitAlphaMaskSmall",
+                "CLAMPTOBLACKADDITIVE",
+                "CLAMPTOBLACKADDITIVE"
+            )
+            glow.flameSoft:AddMaskTexture(glow.flameSoftMask)
+
+            glow.flameMask = glow:CreateMaskTexture(nil, "ARTWORK", nil, 0)
+            -- A tall portrait mask pinches the wide lower flame inward. This
+            -- reads as a compact vase silhouette instead of a flat bowl while
+            -- preserving the animated tips above the flag artwork.
+            glow.flameMask:SetPoint("CENTER", glow, "CENTER", -2, 1)
+            glow.flameMask:SetSize(23, 29)
+            glow.flameMask:SetTexture(
+                "Interface\\CharacterFrame\\TempPortraitAlphaMaskSmall",
+                "CLAMPTOBLACKADDITIVE",
+                "CLAMPTOBLACKADDITIVE"
+            )
+            glow.flame:AddMaskTexture(glow.flameMask)
+        end
+        glow:SetScript("OnUpdate", function(self, elapsed)
+            self.flameElapsed = (self.flameElapsed or 0) + elapsed
+            local frameIndex = math.floor(self.flameElapsed / 0.12) % 8
+            if frameIndex ~= self.flameFrame then
+                self.flameFrame = frameIndex
+                local left = (frameIndex / 8) + (1 / 1024)
+                self.flame:SetTexCoord(left, ((frameIndex + 1) / 8) - (1 / 1024), 0, 1)
+                if self.flameSoft then
+                    self.flameSoft:SetTexCoord(left, ((frameIndex + 1) / 8) - (1 / 1024), 0, 1)
+                end
+            end
+            local breath = 0.5 + (0.5 * math.sin(self.flameElapsed * 4.0))
+            local width = 36 + (3 * breath)
+            local height = 40 + (4 * breath)
+            self.flame:SetSize(width, height)
+            self.flame:SetAlpha(0.24 + (0.12 * breath))
+            if self.flameSoft then
+                self.flameSoft:SetSize(width + 4, height + 4)
+                self.flameSoft:SetAlpha(0.045 + (0.05 * breath))
+            end
+        end)
     end
     glow:Hide()
 
@@ -1339,7 +1460,7 @@ local function TransformBattlefieldPosition(x, y)
 end
 
 -- Synthetic WSG test coordinates. The friendly carrier is deliberately placed in
--- mid so its gold player blip and flag marker can be checked together.
+-- mid so the flag marker, carrier-dot suppression, and carrier hover can be checked.
 local WSG_TEST_FC_MAP_X = 0.515
 local WSG_TEST_FC_MAP_Y = 0.465
 local WSG_TEST_FC_RAW_X = (WSG_TEST_FC_MAP_X - BATTLEFIELD_X_OFFSET) / BATTLEFIELD_X_SCALE
@@ -1353,15 +1474,104 @@ local WSG_TEST_FC_RAW_Y = (WSG_TEST_FC_MAP_Y - BATTLEFIELD_Y_OFFSET) / BATTLEFIE
 local FRIENDLY_FLAG_MARKER_SIZE = 22
 local friendlyFlagMarker = CreateFrame("Frame", nil, map)
 friendlyFlagMarker:SetSize(FRIENDLY_FLAG_MARKER_SIZE, FRIENDLY_FLAG_MARKER_SIZE)
-friendlyFlagMarker:SetFrameLevel(mapBorder:GetFrameLevel() + 4)
-friendlyFlagMarker:EnableMouse(false)
+-- Teammate pins render above this large flag marker so nearby players remain
+-- individually visible around the friendly carrier.
+friendlyFlagMarker:SetFrameLevel(mapBorder:GetFrameLevel() + 2)
+if friendlyFlagMarker.SetMouseMotionEnabled then
+    friendlyFlagMarker:SetMouseMotionEnabled(true)
+else
+    friendlyFlagMarker:EnableMouse(true)
+end
+if friendlyFlagMarker.SetMouseClickEnabled then
+    friendlyFlagMarker:SetMouseClickEnabled(false)
+end
 
-local friendlyFlagGlow = friendlyFlagMarker:CreateTexture(nil, "BACKGROUND")
-friendlyFlagGlow:SetPoint("CENTER", friendlyFlagMarker, "CENTER", 0, 0)
-friendlyFlagGlow:SetSize(FRIENDLY_FLAG_MARKER_SIZE + 12, FRIENDLY_FLAG_MARKER_SIZE + 12)
-friendlyFlagGlow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-friendlyFlagGlow:SetBlendMode("ADD")
-friendlyFlagGlow:SetVertexColor(1.0, 0.82, 0.18, 0.72)
+-- Build the highlight from the flag's own alpha geometry. A broad copy creates
+-- the light beneath the artwork while eight offset copies form a soft outline;
+-- unlike UI-ActionButton-Border, none of these layers introduces a square edge.
+local friendlyFlagGlow = { layers = {}, stars = {}, elapsed = 0, xOffset = -1, yOffset = 1 }
+do
+    local underlay = friendlyFlagMarker:CreateTexture(nil, "ARTWORK", nil, -8)
+    underlay:SetPoint("CENTER", friendlyFlagMarker, "CENTER", friendlyFlagGlow.xOffset, friendlyFlagGlow.yOffset)
+    underlay:SetSize(FRIENDLY_FLAG_MARKER_SIZE + 10, FRIENDLY_FLAG_MARKER_SIZE + 10)
+    underlay:SetTexCoord(0.04, 0.96, 0.04, 0.96)
+    underlay:SetBlendMode("ADD")
+    underlay:SetVertexColor(1.0, 0.92, 0.38, 1)
+    if underlay.SetDesaturated then underlay:SetDesaturated(true) end
+    friendlyFlagGlow.layers[#friendlyFlagGlow.layers + 1] = {
+        texture = underlay,
+        baseAlpha = 0.12,
+        baseSize = FRIENDLY_FLAG_MARKER_SIZE + 10,
+        sizePulse = 0.6,
+        phase = 0,
+        underlay = true,
+    }
+
+    local innerLight = friendlyFlagMarker:CreateTexture(nil, "ARTWORK", nil, -7)
+    innerLight:SetPoint("CENTER", friendlyFlagMarker, "CENTER", friendlyFlagGlow.xOffset, friendlyFlagGlow.yOffset)
+    innerLight:SetSize(FRIENDLY_FLAG_MARKER_SIZE + 4, FRIENDLY_FLAG_MARKER_SIZE + 4)
+    innerLight:SetTexCoord(0.04, 0.96, 0.04, 0.96)
+    innerLight:SetBlendMode("ADD")
+    innerLight:SetVertexColor(1.0, 1.00, 0.72, 1)
+    if innerLight.SetDesaturated then innerLight:SetDesaturated(true) end
+    friendlyFlagGlow.layers[#friendlyFlagGlow.layers + 1] = {
+        texture = innerLight,
+        baseAlpha = 0.16,
+        baseSize = FRIENDLY_FLAG_MARKER_SIZE + 4,
+        sizePulse = 0.5,
+        phase = math.pi,
+        underlay = true,
+    }
+
+    local offsets = {
+        { 0.00,  1.25 }, { 0.88,  0.88 }, { 1.25,  0.00 }, { 0.88, -0.88 },
+        { 0.00, -1.25 }, {-0.88, -0.88 }, {-1.25,  0.00 }, {-0.88,  0.88 },
+    }
+    for index, offset in ipairs(offsets) do
+        local outline = friendlyFlagMarker:CreateTexture(nil, "ARTWORK", nil, -6)
+        outline:SetPoint("CENTER", friendlyFlagMarker, "CENTER", friendlyFlagGlow.xOffset + offset[1], friendlyFlagGlow.yOffset + offset[2])
+        outline:SetSize(FRIENDLY_FLAG_MARKER_SIZE, FRIENDLY_FLAG_MARKER_SIZE)
+        outline:SetTexCoord(0.04, 0.96, 0.04, 0.96)
+        outline:SetBlendMode("ADD")
+        outline:SetVertexColor(1.0, 0.88, 0.16, 1)
+        if outline.SetDesaturated then outline:SetDesaturated(true) end
+        friendlyFlagGlow.layers[#friendlyFlagGlow.layers + 1] = {
+            texture = outline,
+            baseAlpha = 0.22,
+            phase = ((index - 1) / #offsets) * math.pi * 2,
+            radius = 1.25,
+        }
+    end
+
+    local rearStar = friendlyFlagMarker:CreateTexture(nil, "ARTWORK", nil, -5)
+    rearStar:SetPoint("CENTER", friendlyFlagMarker, "CENTER", friendlyFlagGlow.xOffset, friendlyFlagGlow.yOffset)
+    rearStar:SetTexture("Interface\\Cooldown\\star4")
+    rearStar:SetBlendMode("ADD")
+    rearStar:SetVertexColor(1.00, 0.72, 0.05, 1)
+    friendlyFlagGlow.stars[#friendlyFlagGlow.stars + 1] = {
+        texture = rearStar,
+        baseSize = 36,
+        sizePulse = 4,
+        baseAlpha = 0.94,
+        rotationSpeed = 0.95,
+        phase = 0,
+    }
+
+    local whiteStar = friendlyFlagMarker:CreateTexture(nil, "ARTWORK", nil, -4)
+    whiteStar:SetPoint("CENTER", friendlyFlagMarker, "CENTER", friendlyFlagGlow.xOffset, friendlyFlagGlow.yOffset)
+    whiteStar:SetTexture("Interface\\Cooldown\\star4")
+    whiteStar:SetBlendMode("ADD")
+    whiteStar:SetVertexColor(1.00, 0.96, 0.58, 1)
+    friendlyFlagGlow.stars[#friendlyFlagGlow.stars + 1] = {
+        texture = whiteStar,
+        baseSize = 29,
+        sizePulse = 3,
+        baseAlpha = 0.78,
+        rotationSpeed = -1.45,
+        phase = math.pi * 0.72,
+    }
+
+end
 
 local friendlyFlagIcon = friendlyFlagMarker:CreateTexture(nil, "ARTWORK")
 friendlyFlagIcon:SetAllPoints()
@@ -1409,7 +1619,12 @@ local function UpdateFriendlyFlagMarker()
 
         friendlyFlagMarker:ClearAllPoints()
         friendlyFlagMarker:SetPoint("CENTER", map, "TOPLEFT", pixelX, -pixelY)
-        friendlyFlagIcon:SetTexture("Interface\\WorldStateFrame\\" .. GetCarrierFlagToken(true))
+        local flagTexture = "Interface\\WorldStateFrame\\" .. GetCarrierFlagToken(true)
+        friendlyFlagIcon:SetTexture(flagTexture)
+        for _, layer in ipairs(friendlyFlagGlow.layers) do
+            layer.texture:SetTexture(flagTexture)
+            if layer.texture.SetDesaturated then layer.texture:SetDesaturated(true) end
+        end
         friendlyFlagLastTexture = nil
         friendlyFlagMarker:Show()
         return
@@ -1439,6 +1654,10 @@ local function UpdateFriendlyFlagMarker()
 
     if texture ~= friendlyFlagLastTexture then
         friendlyFlagIcon:SetTexture(texture)
+        for _, layer in ipairs(friendlyFlagGlow.layers) do
+            layer.texture:SetTexture(texture)
+            if layer.texture.SetDesaturated then layer.texture:SetDesaturated(true) end
+        end
         friendlyFlagLastTexture = texture
     end
 
@@ -1447,6 +1666,41 @@ end
 
 local friendlyFlagUpdateFrame = CreateFrame("Frame", nil, frame)
 friendlyFlagUpdateFrame:SetScript("OnUpdate", function(self, elapsed)
+    friendlyFlagGlow.elapsed = friendlyFlagGlow.elapsed + elapsed
+    if friendlyFlagMarker:IsShown() then
+        for _, layer in ipairs(friendlyFlagGlow.layers) do
+            if layer.underlay then
+                local pulse = math.sin((friendlyFlagGlow.elapsed * 4.2) + layer.phase)
+                local shimmer = math.sin((friendlyFlagGlow.elapsed * 9.0) - (layer.phase * 1.7))
+                local size = layer.baseSize + (layer.sizePulse * (0.5 + (0.5 * pulse)))
+                layer.texture:SetSize(size, size)
+                layer.texture:SetAlpha(layer.baseAlpha * (0.82 + (0.13 * pulse) + (0.05 * shimmer)))
+            else
+                local radius = layer.radius + (0.10 * math.sin((friendlyFlagGlow.elapsed * 4.8) + layer.phase))
+                layer.texture:ClearAllPoints()
+                layer.texture:SetPoint(
+                    "CENTER",
+                    friendlyFlagMarker,
+                    "CENTER",
+                    friendlyFlagGlow.xOffset + (math.cos(layer.phase) * radius),
+                    friendlyFlagGlow.yOffset + (math.sin(layer.phase) * radius)
+                )
+                local sweep = 0.5 + (0.5 * math.sin((friendlyFlagGlow.elapsed * 5.4) - layer.phase))
+                local shimmer = 0.5 + (0.5 * math.sin((friendlyFlagGlow.elapsed * 10.8) + (layer.phase * 2.3)))
+                layer.texture:SetAlpha(layer.baseAlpha * (0.42 + (0.48 * sweep) + (0.16 * shimmer)))
+            end
+        end
+        for _, star in ipairs(friendlyFlagGlow.stars) do
+            local wave = 0.5 + (0.5 * math.sin((friendlyFlagGlow.elapsed * 5.6) + star.phase))
+            local flash = star.sharp and (wave * wave * wave * wave) or wave
+            local size = star.baseSize + (star.sizePulse * flash)
+            star.texture:SetSize(size, size)
+            star.texture:SetAlpha(star.baseAlpha * ((star.sharp and 0.20 or 0.62) + ((star.sharp and 0.80 or 0.38) * flash)))
+            if star.texture.SetRotation then
+                star.texture:SetRotation((friendlyFlagGlow.elapsed * star.rotationSpeed) + star.phase)
+            end
+        end
+    end
     friendlyFlagUpdateElapsed = friendlyFlagUpdateElapsed + elapsed
     if friendlyFlagUpdateElapsed < 0.10 then
         return
@@ -1773,6 +2027,10 @@ ZurkMapsWSGRank = ZurkMapsPlayerBlips.CreateRankController({
     getUiMapID = GetWSGUiMapID,
     getDotSize = function() return ZurkMapsPlayerBlips.GetDotSize(FRIENDLY_PLAYER_DOT_SIZE, frame) end,
     getClassColor = function(unit) return ZurkMapsPlayerBlips.GetClassColor(unit, CLASS_COLOR_FALLBACK) end,
+    shouldIncludeUnit = function(unit)
+        local friendlyCarrier = GetCarrierAssignments()
+        return not (friendlyCarrier and CarrierNameMatches(unit, friendlyCarrier))
+    end,
     mapWidth = MAP_WIDTH,
     mapHeight = MAP_HEIGHT,
 })
@@ -2084,7 +2342,9 @@ UpdateWSGTestBlips = function()
         end
         blip:ClearAllPoints()
         blip:SetPoint("CENTER", map, "TOPLEFT", agent.x * mapWidth, -(agent.y * mapHeight))
-        blip:SetShown(wsgTestMode)
+        -- Agent 1 is the synthetic friendly carrier. The flag owns that
+        -- position and hover affordance, so do not stack a gold dot over it.
+        blip:SetShown(wsgTestMode and i ~= 1)
     end
 end
 ShowWSGTestBlips = function() UpdateWSGTestBlips() end
@@ -2678,6 +2938,45 @@ local function ClearFriendlyPlayerTooltip()
     end
 end
 
+friendlyFlagMarker.ShowCarrierTooltip = function(self)
+    if wsgTestMode then
+        local carrier = ZurkMapsWSGTestSim.agents and ZurkMapsWSGTestSim.agents[1]
+        return carrier and ZurkMapsWSGTestSim.ShowTooltip({ carrier }) or false
+    end
+
+    local friendlyCarrier = GetCarrierAssignments()
+    local unit = FindFriendlyCarrierUnit(friendlyCarrier)
+    if unit then
+        return ShowFriendlyPlayerTooltip({ unit })
+    end
+    if not friendlyCarrier then
+        return false
+    end
+
+    local classToken = GetCarrierClassToken(friendlyCarrier, nil)
+    local r, g, b = GetClassColor(classToken)
+    hoveredFriendlyPlayersSignature = "carrier:" .. friendlyCarrier
+    ShowZone(nil)
+    GameTooltip:SetOwner(UIParent, "ANCHOR_NONE")
+    if GameTooltip_SetDefaultAnchor then
+        GameTooltip_SetDefaultAnchor(GameTooltip, UIParent)
+    else
+        GameTooltip:ClearAllPoints()
+        GameTooltip:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -95, 95)
+    end
+    GameTooltip:ClearLines()
+    GameTooltip:AddLine(friendlyCarrier, r, g, b)
+    GameTooltip:Show()
+    return true
+end
+
+friendlyFlagMarker:SetScript("OnEnter", function(self)
+    self:ShowCarrierTooltip()
+end)
+friendlyFlagMarker:SetScript("OnLeave", function()
+    ClearFriendlyPlayerTooltip()
+end)
+
 map:SetScript("OnUpdate", function(self, elapsed)
     if ZurkMapsOptions and ZurkMapsOptions.menu and ZurkMapsOptions.menu:IsShown() then
         return
@@ -2708,6 +3007,15 @@ map:SetScript("OnUpdate", function(self, elapsed)
     local friendlyUnits = GetFriendlyPlayerMouseoverUnits()
     if friendlyUnits then
         ShowFriendlyPlayerTooltip(friendlyUnits)
+        return
+    end
+
+
+    -- The transparent native carrier pin normally supplies this tooltip. The
+    -- flag marker is also a fallback hover target if its API position differs
+    -- by a pixel or two from Blizzard's roster-position frame.
+    if friendlyFlagMarker:IsShown() and friendlyFlagMarker:IsMouseOver() then
+        friendlyFlagMarker:ShowCarrierTooltip()
         return
     end
 

@@ -18,6 +18,7 @@ ZurkMaps_WSGHonor.lua
 ZurkMaps_ABHonor.lua
 ZurkMaps_AVHonor.lua
 ZurkMaps_AVQuickMessages.lua
+ZurkMaps_AVTimers.lua
 ZurkMaps_AVLieutenants.lua
 ZurkMaps_WSG.lua
 ZurkMaps_AB.lua

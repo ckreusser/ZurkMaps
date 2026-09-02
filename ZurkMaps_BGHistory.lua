@@ -1,9 +1,11 @@
 -- Shared per-battleground honor history for Zurk Maps honor-bar estimates.
+-- Credit: Nova Instance Tracker inspired the battleground-run history model;
+-- Zurk Maps also reads NIT's public saved history when it is available.
 ZurkMapsBGHistory = ZurkMapsBGHistory or {}
 
 local History = ZurkMapsBGHistory
-local MAX_LOCAL_RUNS = 40
-local AVERAGE_RUNS = 10
+local MAX_LOCAL_RUNS = 50
+local AVERAGE_RUNS = 50
 
 ZurkMapsHonorDB = ZurkMapsHonorDB or {}
 
@@ -167,7 +169,7 @@ end
 
 function History.GetRecentSamples(instanceName, limit)
     if not BG_CONFIG[instanceName] then return {} end
-    limit = tonumber(limit) or AVERAGE_RUNS
+    limit = math.max(1, math.min(AVERAGE_RUNS, math.floor(tonumber(limit) or AVERAGE_RUNS)))
     local samples, seen = {}, {}
     AddLocalSamples(instanceName, samples, seen)
     AddNovaSamples(instanceName, samples, seen)

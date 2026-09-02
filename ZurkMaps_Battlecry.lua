@@ -47,6 +47,21 @@ function ZurkMapsBattlecry.Create(options)
         return self:GetDefaultMessage()
     end
 
+    function battlecry:LoadSavedMessage(db, legacyMessage)
+        self.db = type(db) == "table" and db or self.db or {}
+        -- Migrate an older location only when the dedicated value has never
+        -- existed. A user's saved string always wins over defaults and updates.
+        if self.db[self.dbKey] == nil and type(legacyMessage) == "string" then
+            self.db[self.dbKey] = legacyMessage
+        end
+        self.currentMessage = self:GetMessage()
+        if self.editBox and not self.editBox:HasFocus() then
+            self.editBox:SetText(self.currentMessage)
+        end
+        return self.currentMessage
+    end
+    battlecry:LoadSavedMessage(options.db, options.legacyMessage)
+
     function battlecry:TrimMessage(text)
         text = tostring(text or "")
         text = string.gsub(text, "^%s+", "")
