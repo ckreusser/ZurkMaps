@@ -425,7 +425,7 @@ local function SizeTowerFireEffect(button, sizeMultiplier)
     effect:SetPoint("BOTTOM", button, "CENTER", 0, (iconSize * TOWER_FIRE_Y_OFFSET) + 3 - (fullSize * 0.5))
 end
 
-local function PlayTowerDestroyedEffect(objective, forceHonor)
+local function PlayTowerDestroyedEffect(objective)
     if not objective then return end
     local button = objectiveButtons[objective.id]
     if not button then return end
@@ -468,7 +468,7 @@ local function PlayTowerDestroyedEffect(objective, forceHonor)
         end
     end)
 
-    if forceHonor or IsEnemyAVTower(objective) then
+    if IsEnemyAVTower(objective) then
         if C_Timer and C_Timer.After then
             C_Timer.After(0.18, function() ShowTowerHonorFloat(button, TOWER_DESTROY_HONOR) end)
         else
@@ -1458,7 +1458,6 @@ local function SetTestMode(flag)
         UpdateLivePlayerHitButtons()
     else
         avTestMode=false
-        if avObjectiveTimers and avObjectiveTimers.StopTest then avObjectiveTimers:StopTest() end
         if ZurkMapsAVLieutenants and ZurkMapsAVLieutenants.SetTestMode then ZurkMapsAVLieutenants.SetTestMode(false) end
         ClearTestHoverLock()
         HideAVTestBlips()
@@ -1574,9 +1573,6 @@ if ZurkMapsAVTimers and ZurkMapsAVTimers.Create then
                 local chatType=IsInBattlegroundInstance() and "INSTANCE_CHAT" or "SAY"
                 SendChatCompat(message,chatType)
             end
-        end,
-        onTestTowerComplete=function(objective)
-            PlayTowerDestroyedEffect(objective,true)
         end,
     })
 end
@@ -1773,13 +1769,9 @@ SlashCmdList["AVCALLOUTS"]=function(msg)
     elseif msg=="hide" then manualVisibility="hide"; UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV map hidden.")
     elseif msg=="reset" then ResetLayout(); print("|cff33ff99Zurk Maps|r AV position and size reset.")
     elseif msg=="refresh" then RefreshObjectives(); print("|cff33ff99Zurk Maps|r AV objectives refreshed.")
-    elseif msg=="test timers" then
-        SetTestMode(true)
-        if avObjectiveTimers and avObjectiveTimers.StartTest then avObjectiveTimers:StartTest() end
-        UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV objective timer test started.")
     elseif msg=="test" then SetTestMode(true); UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV test mode enabled.")
     elseif msg=="test off" or msg=="test clear" then SetTestMode(false); UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV test mode disabled.")
-    else print("|cff33ff99Zurk Maps|r AV commands: |cffffff00/av show|r, |cffffff00/av hide|r, |cffffff00/av reset|r, |cffffff00/av refresh|r, |cffffff00/av test|r, |cffffff00/av test timers|r, |cffffff00/av test off|r") end
+    else print("|cff33ff99Zurk Maps|r AV commands: |cffffff00/av show|r, |cffffff00/av hide|r, |cffffff00/av reset|r, |cffffff00/av refresh|r, |cffffff00/av test|r, |cffffff00/av test off|r") end
 end
 
 if ZurkMapsOptions then
@@ -1798,7 +1790,6 @@ if ZurkMapsOptions then
         commands={
             {label="Hide Map",command="hide"},
             {label="Reset Position & Size",command="reset"},
-            {label="Test Objective Timers",command="test timers"},
             {label="Start Test",command="test"},
             {label="Stop Test",command="test off"},
         }

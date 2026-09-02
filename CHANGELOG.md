@@ -8,7 +8,6 @@ All notable changes to Zurk Maps will be documented in this file.
 
 - Added compact M:SS capture timers for every contested Alterac Valley tower and graveyard, regardless of player faction.
 - Added timer tooltips and callouts: left-click reports remaining time; right-click reports an enemy-held objective as weak or requests reinforcements for a friendly-held objective.
-- Added an AV timer test mode with short tower timers, randomized graveyard timers, tower fire, honor gains, and completion animations.
 - Added animated geometry-following glows to the WSG friendly flag marker and friendly-carrier health-bar icon.
 - Added a clipped, animated tower-fire treatment behind the WSG enemy-carrier health-bar flag icon.
 - Added default Alterac Valley quick messages for slots 1–4 covering the North-to-Dwarf rush, stump counterplay, back-cap warnings, and coordinated flag pushes.
@@ -16,6 +15,7 @@ All notable changes to Zurk Maps will be documented in this file.
 
 ### Changed
 
+- Removed the synthetic AV objective-timer test control and `/av test timers` command; the regular AV map/NPC inspection test remains available.
 - Nudged the WSG enemy-carrier health-bar flame one pixel right for final icon alignment.
 - AV timer boxes now use compact fixed-position clock glyphs, objective-specific placement, faction-colored completion borders, a smooth grow pulse, and a 0.3-second fade.
 - Improved AV tower-destruction fire with a faster, smoother whoosh and centered honor-gain text.

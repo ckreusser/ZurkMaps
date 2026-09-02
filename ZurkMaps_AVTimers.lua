@@ -86,7 +86,6 @@ function Timers.Create(options)
         objectiveByID = {},
         objectiveByPoiID = {},
         pendingZMCompatTimes = {},
-        testMode = false,
         elapsed = 0,
     }
 
@@ -305,7 +304,6 @@ function Timers.Create(options)
         local state = self:GetState(objective)
         local box = objective and self.boxes[objective.id]
         if not state or not box then return end
-        local completionSource = state.source
         state.endsAt = nil
         state.source = nil
         state.animationStart = Now()
@@ -316,9 +314,6 @@ function Timers.Create(options)
         box:SetAlpha(1)
         box:EnableMouse(false)
         box:Show()
-        if completionSource == "test" and objective.kind == "tower" and type(options.onTestTowerComplete) == "function" then
-            options.onTestTowerComplete(objective)
-        end
     end
 
     function controller:ClearObjective(objective, clearTexture)
@@ -361,8 +356,6 @@ function Timers.Create(options)
             self.objectiveByPoiID[areaPoiID] = objective
         end
 
-        if self.testMode then return end
-
         if nowContested then
             if not wasContested or previousTexture ~= textureIndex then
                 state.captureFaction = AttackingFactionFromTexture(textureIndex)
@@ -403,7 +396,7 @@ function Timers.Create(options)
         end
 
         local state = self:GetState(objective)
-        if self.testMode or not IsContested(objective, state.textureIndex) then return end
+        if not IsContested(objective, state.textureIndex) then return end
         local current = state.endsAt and (state.endsAt - Now()) or nil
         if not current or remaining <= current + 2 then
             self:SetRemaining(objective, remaining, "zm-compat-sync")
@@ -417,31 +410,7 @@ function Timers.Create(options)
         end
     end
 
-    function controller:StartTest()
-        self.testMode = true
-        for index, objective in ipairs(self.objectives) do
-            if objective.kind == "tower" or objective.kind == "gy" then
-                local state = self:GetState(objective)
-                local originalOwner = OwnerFactionFromTexture(objective.defaultTexture)
-                state.ownerFaction = originalOwner
-                state.captureFaction = OppositeFaction(originalOwner) or (index % 2 == 0 and "Alliance" or "Horde")
-                local remaining = objective.kind == "tower" and math.random(1, 15) or math.random(61, 300)
-                self:SetRemaining(objective, remaining, "test")
-            end
-        end
-    end
-
-    function controller:StopTest()
-        self.testMode = false
-        for _, objective in ipairs(self.objectives) do
-            if objective.kind == "tower" or objective.kind == "gy" then
-                self:ClearObjective(objective, true)
-            end
-        end
-    end
-
     function controller:Reset()
-        self.testMode = false
         self.pendingZMCompatTimes = {}
         self.objectiveByPoiID = {}
         for _, objective in ipairs(self.objectives) do
