@@ -93,6 +93,9 @@ frame:Hide()
 frame:SetSize(MAP_WIDTH + 10, MAP_HEIGHT + (ACTION_HEIGHT * 2) + MOVE_HANDLE_HEIGHT)
 frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 frame:SetClampedToScreen(true)
+-- Reserve the report footer even while hidden, so a new callout cannot move
+-- the protected map in combat or appear below the bottom of the screen.
+frame:SetClampRectInsets(0, 0, 0, -(ZurkMapsWSGIncoming.RECEIPT_HEIGHT - ZurkMapsWSGIncoming.RECEIPT_OVERLAP))
 frame:SetMovable(true)
 
 local map = CreateFrame("Frame", nil, frame)
@@ -315,92 +318,97 @@ resizeHandle:SetScript("OnUpdate", function(self, elapsed)
     UpdateMoveHandleScale(newScale)
 end)
 
--- There is only one visible hotspot texture at a time.
--- With no mouseover, this texture is hidden, so there are no visible
--- boundaries, hotspot fills, or map labels.
-local highlightTexture = CreateFrame("Frame", nil, map)
-highlightTexture:SetAllPoints()
-highlightTexture:SetFrameLevel(map:GetFrameLevel())
-highlightTexture:EnableMouse(false)
-highlightTexture.texture = highlightTexture:CreateTexture(nil, "ARTWORK")
-highlightTexture.texture:SetAllPoints()
-highlightTexture.fills = {}
-highlightTexture.edges = {}
+-- Hover and incoming chat reports share exactly the same area artwork and
+-- polygon renderer. Each possible reported area gets its own reusable layer.
+local function CreateWSGHighlight()
+    local highlightTexture = CreateFrame("Frame", nil, map)
+    highlightTexture:SetAllPoints()
+    highlightTexture:SetFrameLevel(map:GetFrameLevel())
+    highlightTexture:EnableMouse(false)
+    highlightTexture.texture = highlightTexture:CreateTexture(nil, "ARTWORK")
+    highlightTexture.texture:SetAllPoints()
+    highlightTexture.fills = {}
+    highlightTexture.edges = {}
 
--- Render the edited ramp directly from its polygon so the visual boundary and
--- source geometry cannot diverge from a stale, pre-rendered highlight mask.
-function highlightTexture:SetZone(zone)
-    self.zone = zone
-    for _, fill in ipairs(self.fills) do fill:Hide() end
-    for _, edge in ipairs(self.edges) do edge:Hide() end
-    if not zone.drawPolygon then
-        self.texture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id)
-        self.texture:Show()
-        return
-    end
-    self.texture:Hide()
-    local width, height = self:GetWidth(), self:GetHeight()
-    if not width or not height or width <= 0 or height <= 0 then return end
-    local points, minY, maxY = zone.points, 100, 0
-    for _, point in ipairs(points) do
-        minY, maxY = math.min(minY, point[2]), math.max(maxY, point[2])
-    end
-    local rowHeight, used = 0.5, 0
-    local firstY, lastY = minY * height / 100, maxY * height / 100
-    for rowY = firstY, lastY - 0.001, rowHeight do
-        local h = math.min(rowHeight, lastY - rowY)
-        local sampleY = (rowY + h / 2) * 100 / height
-        local crossings = {}
-        local previous = points[#points]
+    -- Render the edited ramp directly from its polygon so the visual boundary and
+    -- source geometry cannot diverge from a stale, pre-rendered highlight mask.
+    function highlightTexture:SetZone(zone)
+        self.zone = zone
+        for _, fill in ipairs(self.fills) do fill:Hide() end
+        for _, edge in ipairs(self.edges) do edge:Hide() end
+        if not zone.drawPolygon then
+            self.texture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id)
+            self.texture:Show()
+            return
+        end
+        self.texture:Hide()
+        local width, height = self:GetWidth(), self:GetHeight()
+        if not width or not height or width <= 0 or height <= 0 then return end
+        local points, minY, maxY = zone.points, 100, 0
         for _, point in ipairs(points) do
-            if (point[2] > sampleY) ~= (previous[2] > sampleY) then
-                crossings[#crossings + 1] = point[1] + ((sampleY - point[2]) * (previous[1] - point[1]) / (previous[2] - point[2]))
-            end
-            previous = point
+            minY, maxY = math.min(minY, point[2]), math.max(maxY, point[2])
         end
-        table.sort(crossings)
-        for index = 1, #crossings - 1, 2 do
-            used = used + 1
-            local fill = self.fills[used]
-            if not fill then
-                fill = self:CreateTexture(nil, "ARTWORK")
-                fill:SetColorTexture(245 / 255, 65 / 255, 65 / 255, 72 / 255)
-                if fill.SetSnapToPixelGrid then fill:SetSnapToPixelGrid(false) end
-                if fill.SetTexelSnappingBias then fill:SetTexelSnappingBias(0) end
-                self.fills[used] = fill
+        local rowHeight, used = 0.5, 0
+        local firstY, lastY = minY * height / 100, maxY * height / 100
+        for rowY = firstY, lastY - 0.001, rowHeight do
+            local h = math.min(rowHeight, lastY - rowY)
+            local sampleY = (rowY + h / 2) * 100 / height
+            local crossings = {}
+            local previous = points[#points]
+            for _, point in ipairs(points) do
+                if (point[2] > sampleY) ~= (previous[2] > sampleY) then
+                    crossings[#crossings + 1] = point[1] + ((sampleY - point[2]) * (previous[1] - point[1]) / (previous[2] - point[2]))
+                end
+                previous = point
             end
-            fill:ClearAllPoints()
-            fill:SetPoint("TOPLEFT", self, "TOPLEFT", crossings[index] * width / 100, -rowY)
-            fill:SetSize((crossings[index + 1] - crossings[index]) * width / 100, h)
-            fill:Show()
+            table.sort(crossings)
+            for index = 1, #crossings - 1, 2 do
+                used = used + 1
+                local fill = self.fills[used]
+                if not fill then
+                    fill = self:CreateTexture(nil, "ARTWORK")
+                    fill:SetColorTexture(245 / 255, 65 / 255, 65 / 255, 72 / 255)
+                    if fill.SetSnapToPixelGrid then fill:SetSnapToPixelGrid(false) end
+                    if fill.SetTexelSnappingBias then fill:SetTexelSnappingBias(0) end
+                    self.fills[used] = fill
+                end
+                fill:ClearAllPoints()
+                fill:SetPoint("TOPLEFT", self, "TOPLEFT", crossings[index] * width / 100, -rowY)
+                fill:SetSize((crossings[index + 1] - crossings[index]) * width / 100, h)
+                fill:Show()
+            end
+        end
+        for index, point in ipairs(points) do
+            local nextPoint = points[(index % #points) + 1]
+            local edge = self.edges[index]
+            if not edge then
+                edge = self:CreateLine(nil, "OVERLAY")
+                edge:SetColorTexture(1, 105 / 255, 105 / 255, 235 / 255)
+                self.edges[index] = edge
+            end
+            -- Other region masks have a four-pixel outline on a 512x512 source,
+            -- stretched to this portrait map. Match that weight in each direction
+            -- instead of using a thinner, fixed-width runtime line.
+            local dx, dy = nextPoint[1] - point[1], nextPoint[2] - point[2]
+            local sourceLength = math.sqrt(dx * dx + dy * dy)
+            local displayLength = math.sqrt((dx * width) ^ 2 + (dy * height) ^ 2)
+            if displayLength > 0 then
+                edge:SetThickness(4 * width * height * sourceLength / (512 * displayLength))
+            end
+            edge:SetStartPoint("TOPLEFT", self, point[1] * width / 100, -point[2] * height / 100)
+            edge:SetEndPoint("TOPLEFT", self, nextPoint[1] * width / 100, -nextPoint[2] * height / 100)
+            edge:Show()
         end
     end
-    for index, point in ipairs(points) do
-        local nextPoint = points[(index % #points) + 1]
-        local edge = self.edges[index]
-        if not edge then
-            edge = self:CreateLine(nil, "OVERLAY")
-            edge:SetColorTexture(1, 105 / 255, 105 / 255, 235 / 255)
-            self.edges[index] = edge
-        end
-        -- Other region masks have a four-pixel outline on a 512x512 source,
-        -- stretched to this portrait map. Match that weight in each direction
-        -- instead of using a thinner, fixed-width runtime line.
-        local dx, dy = nextPoint[1] - point[1], nextPoint[2] - point[2]
-        local sourceLength = math.sqrt(dx * dx + dy * dy)
-        local displayLength = math.sqrt((dx * width) ^ 2 + (dy * height) ^ 2)
-        if displayLength > 0 then
-            edge:SetThickness(4 * width * height * sourceLength / (512 * displayLength))
-        end
-        edge:SetStartPoint("TOPLEFT", self, point[1] * width / 100, -point[2] * height / 100)
-        edge:SetEndPoint("TOPLEFT", self, nextPoint[1] * width / 100, -nextPoint[2] * height / 100)
-        edge:Show()
-    end
+    highlightTexture:SetScript("OnSizeChanged", function(self)
+        if self.zone and self.zone.drawPolygon then self:SetZone(self.zone) end
+    end)
+    highlightTexture:Hide()
+    return highlightTexture
 end
-highlightTexture:SetScript("OnSizeChanged", function(self)
-    if self.zone and self.zone.drawPolygon then self:SetZone(self.zone) end
-end)
-highlightTexture:Hide()
+
+local highlightTexture = CreateWSGHighlight()
+highlightTexture:SetFrameLevel(map:GetFrameLevel() + 1)
 
 local function StartMove()
     if InCombatLockdown and InCombatLockdown() then
@@ -465,6 +473,8 @@ if frame.actionRow.SetBackdrop then
     frame.actionRow:SetBackdropColor(0.035, 0.022, 0.014, 0.94)
     frame.actionRow:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 0.98)
 end
+
+frame.incomingCallouts = ZurkMapsWSGIncoming.Create(map, ZONES, NESTED_ZONES, CreateWSGHighlight, frame.actionRow)
 
 local allianceFlagCarrier = nil
 local hordeFlagCarrier = nil
@@ -2117,9 +2127,8 @@ ConfigureFriendlyPlayerDots = function()
         ZurkMapsWSGRank.ColorFriendlyUnit("raid" .. i)
     end
 
-    -- Update once after configuration; normal movement updates below only move
-    -- the pins and do not repeatedly rebuild size/color state. This avoids the
-    -- color/overlap flicker seen in the previous build.
+    -- Blizzard may reset pin colors during this refresh. Apply the shared blip
+    -- rules immediately afterward so the carrier stays hidden under its flag.
     pcall(friendlyPlayersFrame.UpdatePlayerPins, friendlyPlayersFrame)
     ZurkMapsWSGRank.UpdateBlips()
     if wsgTestMode and UpdateWSGTestBlips then
@@ -3494,6 +3503,7 @@ end
 
 local function ClearWSGTestMode(silent, deferVisibility)
     wsgTestMode = false
+    frame.incomingCallouts:Clear()
     if HideWSGTestBlips then
         HideWSGTestBlips()
     end
@@ -3523,6 +3533,10 @@ local function PrintWSGOptions()
     print("|cffffff00/wsg test|r - Show 10 moving gold friendly blips plus friendly/enemy FC test data.")
     print("|cffffff00/wsg test off|r - Stop WSG simulation and restore live data.")
     print("|cffffff00/wsg clear|r - Clear detected flag carriers.")
+    print("|cffffff00/wsg callouts on|r or |cffffff00off|r - Toggle incoming /bg (in WSG) and /say location pulses (on by default).")
+    print("|cffffff00/wsg callouts clear|r - Clear incoming location pulses.")
+    print("Open /wsg show, then try /s efc tun, /s efc our ramp, or /s efc roof or gy. Reports pulse for 12 seconds.")
+    print("In Warsong Gulch, friendly /bg callouts also pulse reported locations.")
     print("|cffffff00/wsg flagreport|r - Open the saved flag-position test report.")
 end
 
@@ -3551,7 +3565,15 @@ SlashCmdList["WSGCALLOUTS"] = function(msg)
         print("|cff33ff99Zurk Maps|r position and size reset.")
     elseif msg == "clear" then
         ClearFlagCarriers()
-        print("|cff33ff99Zurk Maps|r flag carriers cleared.")
+        frame.incomingCallouts:Clear()
+        print("|cff33ff99Zurk Maps|r flag carriers and incoming reports cleared.")
+    elseif msg == "callouts on" or msg == "callouts off" then
+        ZurksWSGCalloutMapDB.incomingCallouts = msg == "callouts on"
+        if not ZurksWSGCalloutMapDB.incomingCallouts then frame.incomingCallouts:Clear() end
+        print("|cff33ff99Zurk Maps|r incoming /bg and /say location pulses " .. (ZurksWSGCalloutMapDB.incomingCallouts and "ON." or "OFF."))
+    elseif msg == "callouts clear" then
+        frame.incomingCallouts:Clear()
+        print("|cff33ff99Zurk Maps|r incoming location pulses cleared.")
     elseif msg == "flagreport" then
         ShowFlagDiagnosticReport()
     elseif msg == "flagtest" then

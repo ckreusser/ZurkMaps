@@ -135,8 +135,8 @@ function PlayerBlips.CreateRankController(config)
         max = config.max or 14,
         iconScale = config.iconScale or 0.924,
         cache = {},
+        knownRanks = {},
         blips = {},
-        appliedState = {},
         nativeSpecialAvailable = nil,
         nativeSpecialFrame = nil,
         nativeEliteBaseFrame = nil,
@@ -153,10 +153,18 @@ function PlayerBlips.CreateRankController(config)
         inspectRosterUnits = {},
         seenGUIDs = {},
         eliteSeenGUIDs = {},
-        includeState = {},
     }
 
+    local function IsLocalPlayer(unit)
+        if unit == "player" or (UnitIsUnit and UnitIsUnit(unit, "player")) then return true end
+        local guid = unit and UnitGUID(unit)
+        return guid ~= nil and guid == UnitGUID("player")
+    end
+
     local function ShouldIncludeUnit(unit)
+        -- The local player already has Blizzard's rotating arrow. Never add a
+        -- class dot, helmet, assigned icon, or Elite overlay through a raid alias.
+        if IsLocalPlayer(unit) then return false end
         if type(config.shouldIncludeUnit) ~= "function" then
             return true
         end
@@ -192,13 +200,14 @@ function PlayerBlips.CreateRankController(config)
 
         local inspectedRank = guid and controller.inspectRanks[guid] or nil
         if type(inspectedRank) == "number" and inspectedRank >= controller.min and inspectedRank <= controller.max then
+            controller.knownRanks[guid] = inspectedRank
             controller.cache[unit] = { guid = guid, checkedAt = now, rankNumber = inspectedRank }
             return inspectedRank
         end
 
         local cached = controller.cache[unit]
         if cached and cached.guid == guid and (now - cached.checkedAt) < 1.0 then
-            return cached.rankNumber
+            return cached.rankNumber or (guid and controller.knownRanks[guid])
         end
 
         local rankNumber = nil
@@ -238,6 +247,12 @@ function PlayerBlips.CreateRankController(config)
             end
         end
 
+        -- Rank/title APIs can temporarily return nothing as teammates move out
+        -- of range. Preserve a confirmed rank by identity, not by raid slot.
+        if guid then
+            if rankNumber then controller.knownRanks[guid] = rankNumber end
+            rankNumber = rankNumber or controller.knownRanks[guid]
+        end
         controller.cache[unit] = { guid = guid, checkedAt = now, rankNumber = rankNumber }
         return rankNumber
     end
@@ -360,7 +375,6 @@ function PlayerBlips.CreateRankController(config)
         if lifetimeRank ~= nil then
             controller.inspectRanks[guid] = lifetimeRank
             controller.cache[unit] = nil
-            controller.appliedState[unit] = nil
         end
 
         controller.pendingInspect = nil
@@ -438,8 +452,21 @@ function PlayerBlips.CreateRankController(config)
 
     controller.inspectEventFrame = CreateFrame("Frame")
     controller.inspectEventFrame:RegisterEvent("INSPECT_HONOR_UPDATE")
-    controller.inspectEventFrame:SetScript("OnEvent", function()
-        controller.HandleInspectHonorUpdate()
+    controller.inspectEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    controller.inspectEventFrame:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_ENTERING_WORLD" then
+            -- Keep confirmed ranks for the current world/instance only. Roster
+            -- slot changes within a match must not discard identity-based data.
+            ClearTable(controller.cache)
+            ClearTable(controller.knownRanks)
+            ClearTable(controller.inspectRanks)
+            ClearTable(controller.inspectAttempts)
+            ClearTable(controller.inspectRosterSeen)
+            controller.pendingInspect = nil
+            controller.preGateScanStartedAt = nil
+        else
+            controller.HandleInspectHonorUpdate()
+        end
     end)
 
     if C_Timer and type(C_Timer.NewTicker) == "function" then
@@ -458,25 +485,16 @@ function PlayerBlips.CreateRankController(config)
         end)
     end
 
-    local function ApplyUnitVisualState(unit, guid, rankNumber, assignedIcon)
-        local state = controller.appliedState[unit]
-        if not state then
-            state = {}
-            controller.appliedState[unit] = state
-        end
-        local rankValue = rankNumber or 0
-        local iconValue = assignedIcon or 0
-        if state.guid ~= guid or state.rankNumber ~= rankValue or state.assignedIcon ~= iconValue then
-            state.guid = guid
-            state.rankNumber = rankValue
-            state.assignedIcon = iconValue
-            controller.ColorFriendlyUnit(unit)
-        end
-    end
-
     function controller.ColorFriendlyUnit(unit)
         local friendlyFrame = config.getFriendlyFrame and config.getFriendlyFrame() or nil
         if not (config.isAvailable and config.isAvailable()) or not friendlyFrame or not UnitExists(unit) then
+            return
+        end
+
+        if IsLocalPlayer(unit) then
+            -- Preserve the native arrow's original artwork and tint, even when
+            -- this character has a featured rank or is the friendly carrier.
+            pcall(friendlyFrame.SetUnitColor, friendlyFrame, "player", 1, 1, 1, 1)
             return
         end
 
@@ -609,10 +627,10 @@ function PlayerBlips.CreateRankController(config)
             or type(special.AddUnit) ~= "function" or type(special.ClearUnits) ~= "function" or type(special.FinalizeUnits) ~= "function"
             or type(eliteBase.AddUnit) ~= "function" or type(eliteBase.ClearUnits) ~= "function" or type(eliteBase.FinalizeUnits) ~= "function"
             or type(elite.AddUnit) ~= "function" or type(elite.ClearUnits) ~= "function" or type(elite.FinalizeUnits) ~= "function" then
-            if shadow then shadow:Hide() end
-            if special then special:Hide() end
-            if eliteBase then eliteBase:Hide() end
-            if elite then elite:Hide() end
+            if okShadow and shadow then shadow:Hide() end
+            if okSpecial and special then special:Hide() end
+            if okEliteBase and eliteBase then eliteBase:Hide() end
+            if okElite and elite then elite:Hide() end
             controller.nativeSpecialAvailable = false
             return false
         end
@@ -657,6 +675,7 @@ function PlayerBlips.CreateRankController(config)
     end
 
     function controller.GetSpecialTextureAndSize(unit, dotSize)
+        if not ShouldIncludeUnit(unit) then return nil, nil, nil, nil end
         local assignedIcon = ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.GetAssignedIconForUnit
             and ZurkMapsPlayerIcons.GetAssignedIconForUnit(unit) or nil
         if assignedIcon and ZurkMapsPlayerIcons then
@@ -792,7 +811,6 @@ function PlayerBlips.CreateRankController(config)
                 local guid = UnitGUID(unit)
                 if guid and not seenGUIDs[guid] then
                     local texture, size, assignedIcon, rankNumber = controller.GetSpecialTextureAndSize(unit, dotSize)
-                ApplyUnitVisualState(unit, guid, rankNumber, assignedIcon)
                     if texture and size then
                         seenGUIDs[guid] = true
                         -- Native UnitPositionFrame positioning is the important part:
@@ -849,7 +867,6 @@ function PlayerBlips.CreateRankController(config)
             if UnitExists(unit) and ShouldIncludeUnit(unit) then
                 local guid = UnitGUID(unit)
                 local texture, size, assignedIcon, rankNumber = controller.GetSpecialTextureAndSize(unit, dotSize)
-                    ApplyUnitVisualState(unit, guid, rankNumber, assignedIcon)
                 if guid and not seenGUIDs[guid] and texture then
                     seenGUIDs[guid] = true
                     local x, y = controller.GetUnitMapPosition(unit)
@@ -895,15 +912,12 @@ function PlayerBlips.CreateRankController(config)
         local seenGUIDs = ClearTable(controller.seenGUIDs)
         local dotSize = config.getDotSize and config.getDotSize() or 10
 
-        -- Recolor only when a unit crosses the map-specific inclusion boundary.
-        -- In WSG this cleanly restores the previous carrier's dot and hides the
-        -- new carrier without rebuilding every player visual on every position tick.
+        -- Blizzard's UpdatePlayerPins rebuilds/reset colors (including alpha)
+        -- during full AND periodic appearance updates. Reapply our visibility
+        -- after each refresh, not only when a carrier/rank/assignment changes.
+        -- Otherwise native gold dots reappear over flags, helmets and class dots.
         for _, unit in ipairs(units) do
-            local included = ShouldIncludeUnit(unit)
-            if controller.includeState[unit] ~= included then
-                controller.includeState[unit] = included
-                controller.ColorFriendlyUnit(unit)
-            end
+            controller.ColorFriendlyUnit(unit)
         end
 
         -- Prefer the native UnitPositionFrame:AddUnit path. It avoids separately

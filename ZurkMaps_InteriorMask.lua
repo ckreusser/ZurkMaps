@@ -8,6 +8,14 @@ end
 
 function ZurkMapsInteriorMask.Create(parent, bounds, inset, radius, hardEdges)
     local clip = { masks = {}, bounds = bounds, inset = inset, hardEdges = hardEdges }
+    -- Progress bars already sit inside an opaque border. A rectangular scissor
+    -- preserves their full width and draw layers without mirrored textures or
+    -- filtering a stretched mask across their long axis.
+    if radius == 0 then
+        clip.rectangular = true
+        clip.renderers = {}
+        return clip
+    end
     if not parent.CreateMaskTexture then return clip end
 
     local rectangle = parent:CreateMaskTexture()
@@ -40,7 +48,32 @@ end
 
 function ZurkMapsInteriorMask.Apply(clip, texture)
     DisableSnapping(texture)
-    if not texture.AddMaskTexture or not clip.rectangle or texture._zurkInteriorClip then return end
+    if texture._zurkInteriorClip then return end
+    if clip.rectangular then
+        local parent = texture:GetParent()
+        local renderer = clip.renderers[parent]
+        if not renderer then
+            local viewport = CreateFrame("Frame", nil, parent)
+            viewport:SetFrameLevel(parent:GetFrameLevel())
+            viewport:EnableMouse(false)
+            viewport:SetPoint("TOPLEFT", clip.bounds, "TOPLEFT", clip.inset, -clip.inset)
+            viewport:SetPoint("BOTTOMRIGHT", clip.bounds, "BOTTOMRIGHT", -clip.inset, clip.inset)
+            viewport:SetClipsChildren(true)
+
+            renderer = CreateFrame("Frame", nil, viewport)
+            renderer:SetAllPoints(viewport)
+            renderer:SetFrameLevel(parent:GetFrameLevel())
+            renderer:EnableMouse(false)
+            clip.renderers[parent] = renderer
+        end
+        -- Keep track, fill, stripes and current-honor line on ONE renderer so
+        -- their BACKGROUND/ARTWORK/OVERLAY ordering remains meaningful. Moving
+        -- only the parent preserves anchors to the bar and native UV updates.
+        texture:SetParent(renderer)
+        texture._zurkInteriorClip = clip
+        return
+    end
+    if not texture.AddMaskTexture or not clip.rectangle then return end
 
     -- WoW permits at most THREE masks per texture. Render the same graphic in
     -- two scissored halves, each with at most the rectangle and its two corners.

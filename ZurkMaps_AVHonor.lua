@@ -589,7 +589,7 @@ function Honor.Create(parentFrame, addonFrame, mapHeight, config)
         })
         bar.border:SetBackdropBorderColor(MAP_BORDER_R, MAP_BORDER_G, MAP_BORDER_B, MAP_BORDER_A)
     end
-    bar.interiorMask = ZurkMapsInteriorMask.Create(bar, bar, TRACK_INSET, 2, true)
+    bar.interiorMask = ZurkMapsInteriorMask.Create(bar, bar, TRACK_INSET, 0, true)
 
     bar.track = bar:CreateTexture(nil, "BACKGROUND")
     bar.track:SetPoint("TOPLEFT", bar, "TOPLEFT", TRACK_INSET, -TRACK_INSET)

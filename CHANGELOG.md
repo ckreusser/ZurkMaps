@@ -2,6 +2,25 @@
 
 All notable changes to Zurk Maps will be documented in this file.
 
+## Zurk Maps 1.3.0-r18
+
+### Added
+
+- Added WSG enemy flag carrier location highlights from friendly `/bg` callouts, including battleground leaders and distant teammates.
+- Recognizes common WSG names and slang, with faction-aware qualifiers. Ambiguous reports pulse every plausible area for 12 seconds; newer reports replace older ones and fade automatically.
+- Added `/wsg callouts on`, `/wsg callouts off`, and `/wsg callouts clear`. Friendly `/say` reports remain available for testing outside battlegrounds, with a callout reference and test guide in `WSG_CALLOUTS.md`.
+
+### Changed
+
+- Placed the callout receipt directly beneath CAP/PICK with matching bronze borders, dark styling, class-colored caller names, and screen-edge spacing.
+
+### Fixed
+
+- Restored full-width honor fills, unrealized-honor stripes, and honor-gain stripe animation across WSG, AB, and AV in both vertical and horizontal layouts.
+- Kept the local player's rotating arrow free of overlapping class, rank, and assigned blips in both Gold and Class Colors modes.
+- Prevented ordinary dots from appearing over the WSG friendly flag carrier, class blips, or rank helmets after map updates. Flag handoffs restore the previous carrier's proper icon.
+- Prevented confirmed rank badges from briefly reverting to ordinary blips when rank data is temporarily unavailable or raid slots change. Improved fallback rendering when special blip frames cannot be created.
+
 ## Zurk Maps 1.3.0-r17
 
 ### Changed
