@@ -2,6 +2,107 @@
 -- spend additional top-level locals on the editor implementation.
 ZurkMapsBattlecry = ZurkMapsBattlecry or {}
 
+-- Shared by the maps' framed icon and numbered-message buttons. Use the rank-up
+-- popup's physical-pixel sizing so opposite edges and corners stay consistent.
+-- Keep the button anchored to its map; only its border is snapped to pixels.
+function ZurkMapsBattlecry.CreateButtonBorder(button, style)
+    style = style or {}
+    local border = CreateFrame("Frame", nil, button)
+    border:SetFrameLevel(button:GetFrameLevel() + 2)
+    border:EnableMouse(false)
+
+    local rings = {}
+    for index, color in ipairs({
+        { 0.055, 0.035, 0.018, style.outerAlpha or 1 },
+        { 0.70, 0.52, 0.20, style.innerAlpha or 1 },
+    }) do
+        local lines = {}
+        for edge = 1, 4 do
+            local line = border:CreateTexture(nil, "OVERLAY")
+            line:SetTexture("Interface\\Buttons\\WHITE8X8")
+            line:SetVertexColor(unpack(color))
+            if line.SetSnapToPixelGrid then line:SetSnapToPixelGrid(false) end
+            if line.SetTexelSnappingBias then line:SetTexelSnappingBias(0) end
+            lines[edge] = line
+        end
+        rings[index] = lines
+    end
+
+    function border:SnapToPixels()
+        local unitFactor
+        if PixelUtil and PixelUtil.GetPixelToUIUnitFactor then
+            unitFactor = PixelUtil.GetPixelToUIUnitFactor()
+        elseif GetPhysicalScreenSize then
+            local _, physicalHeight = GetPhysicalScreenSize()
+            if physicalHeight and physicalHeight > 0 then unitFactor = 768 / physicalHeight end
+        end
+        local scale = math.max(0.01, (button:GetEffectiveScale() or 1) / math.max(0.01, unitFactor or 1))
+        local width, height = button:GetWidth(), button:GetHeight()
+        local left, top = button:GetLeft(), button:GetTop()
+        if self._pixelScale == scale and self._buttonWidth == width and self._buttonHeight == height
+            and self._buttonLeft == left and self._buttonTop == top then return end
+        self._pixelScale, self._buttonWidth, self._buttonHeight = scale, width, height
+        self._buttonLeft, self._buttonTop = left, top
+
+        local function Pixels(value) return math.floor(value * scale + 0.5) end
+        -- Snap both endpoints so adjoining AV message cells share the same
+        -- boundary, even when their UI-unit height lands between pixels.
+        local widthPixels = math.max(1, left and (Pixels(left + width) - Pixels(left)) or Pixels(width))
+        local heightPixels = math.max(1, top and (Pixels(top) - Pixels(top - height)) or Pixels(height))
+        local x = left and (Pixels(left) / scale - left) or 0
+        local y = top and (Pixels(top) / scale - top) or 0
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", button, "TOPLEFT", x, y)
+        self:SetSize(widthPixels / scale, heightPixels / scale)
+
+        local stroke = math.max(1, Pixels(style.thickness or 1))
+        local function Place(line, px, py, w, h)
+            line:ClearAllPoints()
+            line:SetPoint("TOPLEFT", self, "TOPLEFT", px / scale, -py / scale)
+            line:SetSize(w / scale, h / scale)
+        end
+        for index, lines in ipairs(rings) do
+            local inset = (index - 1) * stroke
+            local w, h = widthPixels - 2 * inset, heightPixels - 2 * inset
+            Place(lines[1], inset, inset, w, stroke)
+            Place(lines[2], inset, heightPixels - inset - stroke, w, stroke)
+            -- Horizontal strokes own the corners, as in the rank-up popup.
+            Place(lines[3], inset, inset + stroke, stroke, h - 2 * stroke)
+            Place(lines[4], widthPixels - inset - stroke, inset + stroke, stroke, h - 2 * stroke)
+        end
+
+        if self.contentIcon then
+            -- Use the same physical-pixel measurements for the artwork's inner
+            -- margin. Independent texture snapping otherwise makes one side
+            -- of a framed button look thicker than its opposite edge.
+            local inset = (2 * stroke + math.max(0, Pixels(self.contentPadding))) / scale
+            self.contentIcon:ClearAllPoints()
+            self.contentIcon:SetPoint("TOPLEFT", self, "TOPLEFT", inset, -inset)
+            self.contentIcon:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -inset, inset)
+        end
+    end
+
+    function border:FitContent(background, icon, padding)
+        self.contentIcon = icon
+        self.contentPadding = padding or 0
+        for _, texture in ipairs({ background, icon }) do
+            if texture.SetSnapToPixelGrid then texture:SetSnapToPixelGrid(false) end
+            if texture.SetTexelSnappingBias then texture:SetTexelSnappingBias(0) end
+        end
+        background:ClearAllPoints()
+        background:SetAllPoints(self)
+        self._pixelScale = nil
+        self:SnapToPixels()
+    end
+
+    border:SetScript("OnShow", border.SnapToPixels)
+    -- Moving or scaling a parent doesn't necessarily resize the button in UI
+    -- units. The cached check catches those changes without rebuilding frames.
+    border:SetScript("OnUpdate", border.SnapToPixels)
+    border:SnapToPixels()
+    return border
+end
+
 function ZurkMapsBattlecry.Create(options)
     if not options or not options.frame or not options.map or not options.mapBorder then
         return nil
@@ -197,6 +298,9 @@ function ZurkMapsBattlecry.Create(options)
     if options.createBorder then
         battlecry.border = options.createBorder(battlecry.button)
         if battlecry.border then battlecry.border:SetAlpha(options.borderAlpha or 0.72) end
+        if battlecry.border and battlecry.border.FitContent then
+            battlecry.border:FitContent(battlecry.background, battlecry.icon, 1)
+        end
     end
 
     battlecry.button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")

@@ -7,14 +7,7 @@ local Timers = ZurkMapsAVTimers
 
 local CAPTURE_SECONDS = 300
 local UPDATE_INTERVAL = 0.10
-local BORDER_PULSE_SECONDS = 0.24
-local FADE_SECONDS = 0.30
 local ZM_TIMER_COMPAT_PREFIX = "Capping"
-local BORDER_GOLD = { 1.00, 0.78, 0.06 }
-local FACTION_BORDER = {
-    Alliance = { 0.18, 0.52, 1.00 },
-    Horde = { 1.00, 0.16, 0.08 },
-}
 local CONTESTED_TEXTURE_KIND = {
     [3] = "gy",
     [13] = "gy",
@@ -89,45 +82,16 @@ function Timers.Create(options)
         elapsed = 0,
     }
 
-    local function SetBorderExpansion(box, amount)
-        if not box or not box.border then return end
-        amount = math.max(0, tonumber(amount) or 0)
-        box.border:ClearAllPoints()
-        box.border:SetPoint("TOPLEFT", box, "TOPLEFT", -amount, amount)
-        box.border:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", amount, -amount)
-    end
-
-    local function SetBorderColor(box, faction)
-        if not box or not box.border or not box.border.SetBackdropBorderColor then return end
-        local color = FACTION_BORDER[faction] or BORDER_GOLD
-        box.border:SetBackdropBorderColor(color[1], color[2], color[3], 1.00)
-    end
-
-    local function SetClockText(box, value)
-        if not box then return end
-        local minute, tens, ones = GetClockParts(value)
-        box.minute:SetText(minute)
-        box.secondTens:SetText(tens)
-        box.secondOnes:SetText(ones)
-    end
-
-    local function CreateClockGlyph(parent, offsetX)
-        local glyph = parent:CreateFontString(nil, "OVERLAY")
-        glyph:SetPoint("CENTER", parent:GetParent(), "CENTER", offsetX, 0)
-        glyph:SetFont("Fonts\\ARIALN.TTF", 8, "")
-        glyph:SetTextColor(1, 1, 1, 1)
-        glyph:SetShadowColor(0, 0, 0, 1)
-        glyph:SetShadowOffset(1, -1)
-        return glyph
-    end
+    local SetBorderExpansion = ZurkMapsCaptureClock.SetBorderExpansion
+    local SetBorderColor = ZurkMapsCaptureClock.SetBorderColor
+    local SetClockText = ZurkMapsCaptureClock.SetRemaining
 
     local function CreateTimerBox(objective)
         local button = controller.buttons[objective.id]
         if not button or (objective.kind ~= "tower" and objective.kind ~= "gy") then return nil end
 
-        local box = CreateFrame("Button", nil, controller.map)
-        box:SetSize(25, 13)
-        box:SetFrameLevel(((controller.mapBorder and controller.mapBorder:GetFrameLevel()) or controller.map:GetFrameLevel()) + 8)
+        local box = ZurkMapsCaptureClock.Create(controller.map,
+            ((controller.mapBorder and controller.mapBorder:GetFrameLevel()) or controller.map:GetFrameLevel()) + 8)
         box:ClearAllPoints()
 
         -- Keep collision-prone clocks beside their icons. The paired Frostwolf
@@ -142,32 +106,6 @@ function Timers.Create(options)
             box:SetPoint("TOP", button, "BOTTOM", 0, 0)
         end
 
-        box.background = box:CreateTexture(nil, "BACKGROUND")
-        box.background:SetPoint("TOPLEFT", box, "TOPLEFT", 2, -1)
-        box.background:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -2, 1)
-        box.background:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
-        box.background:SetVertexColor(0.018, 0.014, 0.006, 0.96)
-
-        box.border = CreateFrame("Frame", nil, box, BackdropTemplateMixin and "BackdropTemplate" or nil)
-        box.border:SetFrameLevel(box:GetFrameLevel() + 1)
-        if box.border.SetBackdrop then
-            box.border:SetBackdrop({
-                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                tile = false,
-                edgeSize = 6,
-                insets = { left = 1, right = 1, top = 1, bottom = 1 },
-            })
-        end
-        SetBorderExpansion(box, 0)
-        SetBorderColor(box, nil)
-
-        -- Four fixed glyph positions make the display behave like a clock. The
-        -- numerals never recenter or slide as proportional character widths change.
-        box.minute = CreateClockGlyph(box.border, -6.5)
-        box.colon = CreateClockGlyph(box.border, -2.2)
-        box.secondTens = CreateClockGlyph(box.border, 1.9)
-        box.secondOnes = CreateClockGlyph(box.border, 6.0)
-        box.colon:SetText(":")
         SetClockText(box, CAPTURE_SECONDS)
 
         box:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -308,12 +246,7 @@ function Timers.Create(options)
         state.source = nil
         state.animationStart = Now()
         state.animationFaction = faction or state.captureFaction or state.ownerFaction
-        SetClockText(box, 0)
-        SetBorderExpansion(box, 0)
-        SetBorderColor(box, state.animationFaction)
-        box:SetAlpha(1)
-        box:EnableMouse(false)
-        box:Show()
+        ZurkMapsCaptureClock.Complete(box, state.animationFaction)
     end
 
     function controller:ClearObjective(objective, clearTexture)
@@ -432,26 +365,9 @@ function Timers.Create(options)
             local objective = controller.objectiveByID[objectiveID]
             local box = controller.boxes[objectiveID]
             if state.animationStart and box then
-                -- Animation runs every rendered frame. It begins at the timer's
-                -- normal dimensions, eases outward, and returns before fading.
-                local animationTime = now - state.animationStart
-                if animationTime < BORDER_PULSE_SECONDS then
-                    local progress = math.max(0, math.min(1, animationTime / BORDER_PULSE_SECONDS))
-                    local pulse = math.sin(progress * math.pi)
-                    SetBorderExpansion(box, pulse * pulse * 2)
-                    box:SetAlpha(1)
-                else
-                    SetBorderExpansion(box, 0)
-                    local fadeProgress = (animationTime - BORDER_PULSE_SECONDS) / FADE_SECONDS
-                    box:SetAlpha(math.max(0, 1 - fadeProgress))
-                    if fadeProgress >= 1 then
-                        state.animationStart = nil
-                        state.animationFaction = nil
-                        box:SetAlpha(1)
-                        box:EnableMouse(true)
-                        SetBorderColor(box, nil)
-                        box:Hide()
-                    end
+                if ZurkMapsCaptureClock.AnimateCompletion(box, now - state.animationStart) then
+                    state.animationStart = nil
+                    state.animationFaction = nil
                 end
             elseif state.endsAt and updateClock then
                 local remaining = state.endsAt - now

@@ -274,7 +274,7 @@ local function EnsureMenuFrame()
     frame.rightLabel:SetText("/RW")
     frame.rightLabel:SetPoint("RIGHT", frame.switchClickArea, "RIGHT", 0, 0)
     frame.switchTrack = CreateFrame("Frame", nil, frame.switchClickArea, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    frame.switchTrack:SetSize(32, 14)
+    frame.switchTrack:SetSize(40, 18)
     frame.switchTrack:SetPoint("RIGHT", frame.rightLabel, "LEFT", -4, 0)
     frame.switchTrack:EnableMouse(false)
     if frame.switchTrack.SetBackdrop then
@@ -287,12 +287,10 @@ local function EnsureMenuFrame()
         frame.switchTrack:SetBackdropBorderColor(0.55, 0.50, 0.40, 1)
     end
     frame.switchTrack.thumb = frame.switchTrack:CreateTexture(nil, "OVERLAY")
-    frame.switchTrack.thumb:SetSize(16, 10)
-    if frame.switchTrack.thumb.SetAtlas then
-        frame.switchTrack.thumb:SetAtlas("wowlabs-switch-slots-key", false)
-    else
-        frame.switchTrack.thumb:SetColorTexture(0.9, 0.78, 0.50, 1)
-    end
+    frame.switchTrack.thumb:SetAtlas("wowlabs-switch-slots-key", false)
+    -- Keep the native artwork, wider with less vertical stretch. Its transparent
+    -- margins fit within the enlarged track while the visible key fills its height.
+    frame.switchTrack.thumb:SetSize(20, 18)
     frame.leftLabel = frame.switchClickArea:CreateFontString(nil, "OVERLAY")
     frame.leftLabel:SetFont("Fonts\\FRIZQT__.TTF", 10)
     frame.leftLabel:SetText("/bg")
@@ -375,7 +373,10 @@ local function UpdateSwitchVisuals(frame)
         frame.leftLabel:SetTextColor(BG_R, BG_G, BG_B, 1)
     end
     frame.switchTrack.thumb:ClearAllPoints()
-    frame.switchTrack.thumb:SetPoint("CENTER", frame.switchTrack, "CENTER", raidWarning and 7 or -7, 0)
+    -- Anchor each stop to its own inner edge so resizing the track or thumb
+    -- cannot leave the slider off-center or hanging over an endpoint.
+    local endpoint = raidWarning and "RIGHT" or "LEFT"
+    frame.switchTrack.thumb:SetPoint(endpoint, frame.switchTrack, endpoint, raidWarning and -2 or 2, 0)
 end
 
 local function UpdateTestToggleVisuals(frame)

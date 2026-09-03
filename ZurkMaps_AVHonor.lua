@@ -9,6 +9,7 @@ local CONTRIBUTION_CEILING = { 2000, 5000, 10000, 15000, 20000, 25000, 30000, 35
 local RANK_CHANGE_FACTOR = { 1, 1, 1, 0.8, 0.8, 0.8, 0.7, 0.7, 0.6, 0.5, 0.5, 0.4, 0.4, 0.34, 0.34 }
 local HONOR_INCREMENTS = { 0, 4500, 11250, 22500, 33750, 45000, 77500, 110000, 142500, 175000, 256250, 337500, 418750, 500000 }
 local MAX_RANK = 14
+local TRACK_INSET = 1.5
 local HEADER_BG_R, HEADER_BG_G, HEADER_BG_B, HEADER_BG_A = 0.018, 0.012, 0.008, 0.97
 local MAP_BORDER_R, MAP_BORDER_G, MAP_BORDER_B, MAP_BORDER_A = 0.84, 0.56, 0.31, 0.98
 
@@ -575,31 +576,33 @@ function Honor.Create(parentFrame, addonFrame, mapHeight, config)
     bar:SetFrameLevel(parentFrame:GetFrameLevel() + 25)
     bar:EnableMouse(true)
 
-    if bar.SetBackdrop then
-        bar:SetBackdrop({
-            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    -- Keep the rim above every background/fill layer. Its transparent padding
+    -- must never reveal an unmasked square corner or a gap beside the track.
+    bar.border = CreateFrame("Frame", nil, bar, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    bar.border:SetAllPoints(bar)
+    bar.border:SetFrameLevel(bar:GetFrameLevel() + 2)
+    bar.border:EnableMouse(false)
+    if bar.border.SetBackdrop then
+        bar.border:SetBackdrop({
             edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 8,
             edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
         })
-        bar:SetBackdropColor(0, 0, 0, 0)
-        bar:SetBackdropBorderColor(MAP_BORDER_R, MAP_BORDER_G, MAP_BORDER_B, MAP_BORDER_A)
+        bar.border:SetBackdropBorderColor(MAP_BORDER_R, MAP_BORDER_G, MAP_BORDER_B, MAP_BORDER_A)
     end
+    bar.interiorMask = ZurkMapsInteriorMask.Create(bar, bar, TRACK_INSET, 2, true)
 
     bar.track = bar:CreateTexture(nil, "BACKGROUND")
-    bar.track:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -2)
-    bar.track:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -2, 2)
+    bar.track:SetPoint("TOPLEFT", bar, "TOPLEFT", TRACK_INSET, -TRACK_INSET)
+    bar.track:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -TRACK_INSET, TRACK_INSET)
     bar.track:SetTexture("Interface\\Buttons\\WHITE8X8")
-    bar.track:SetVertexColor(HEADER_BG_R, HEADER_BG_G, HEADER_BG_B, 0.82)
+    bar.track:SetVertexColor(HEADER_BG_R, HEADER_BG_G, HEADER_BG_B, 1)
 
     bar.fill = bar:CreateTexture(nil, "ARTWORK", nil, 1)
     bar.fill:SetTexture("Interface\\TargetingFrame\\UI-StatusBar")
     -- Rotate Blizzard's horizontal status-bar grain 90 degrees for this vertical bar.
     bar.fill:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0)
-    bar.fill:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 2, 2)
-    bar.fill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -2, 2)
+    bar.fill:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", TRACK_INSET, TRACK_INSET)
+    bar.fill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -TRACK_INSET, TRACK_INSET)
 
     bar.incompleteOverlay = bar:CreateTexture(nil, "ARTWORK", nil, 3)
     bar.incompleteOverlay:SetTexture("Interface\\Buttons\\WHITE8X8")
@@ -635,15 +638,10 @@ function Honor.Create(parentFrame, addonFrame, mapHeight, config)
     bar.currentLine:SetWidth(11)
     bar.currentLine:SetVertexColor(1.0, 0.92, 0.55, 1)
 
-    -- Clip the live honor indicator to the same inner track as breakpoint ticks.
-    -- Anchoring the mask to the bar also handles resizing and either orientation.
-    if bar.CreateMaskTexture and bar.currentLine.AddMaskTexture then
-        bar.currentLineMask = bar:CreateMaskTexture(nil, "OVERLAY", nil, 5)
-        bar.currentLineMask:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -2)
-        bar.currentLineMask:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -2, 2)
-        bar.currentLineMask:SetTexture("Interface\\Buttons\\WHITE8X8", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-        bar.currentLine:AddMaskTexture(bar.currentLineMask)
+    for _, texture in ipairs({ bar.track, bar.fill, bar.incompleteOverlay, bar.unrealizedStripes, bar.currentLine }) do
+        ZurkMapsInteriorMask.Apply(bar.interiorMask, texture)
     end
+    bar.currentLineMask = bar.interiorMask.rectangle
 
 
     bar.segments = {}
@@ -686,15 +684,8 @@ function Honor.Create(parentFrame, addonFrame, mapHeight, config)
         marker.tick:SetWidth(9)
         marker.tick:SetPoint("CENTER", marker, "CENTER", 0.5, 0)
 
-        -- Span the complete cross-axis, then clip to the Honor Bar's inner
-        -- dark track so the delineation connects without touching the border.
-        if bar.CreateMaskTexture and marker.tick.AddMaskTexture then
-            marker.tickMask = bar:CreateMaskTexture(nil, "OVERLAY", nil, 5)
-            marker.tickMask:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -2)
-            marker.tickMask:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -2, 2)
-            marker.tickMask:SetTexture("Interface\\Buttons\\WHITE8X8", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-            marker.tick:AddMaskTexture(marker.tickMask)
-        end
+        ZurkMapsInteriorMask.Apply(bar.interiorMask, marker.tick)
+        marker.tickMask = bar.interiorMask.rectangle
 
         marker.rankIcon = marker:CreateTexture(nil, "OVERLAY", nil, 7)
         marker.rankIcon:SetSize(13, 13)
@@ -769,12 +760,12 @@ function Honor.Refresh(force)
     bar.signature = signature
 
     local r, g, b = GetFactionHonorColor()
-    bar.fill:SetVertexColor(r, g, b, 0.95)
+    bar.fill:SetVertexColor(r, g, b, 1)
 
     local horizontal = IsHorizontalWidgetBar(bar)
     local barWidth = bar:GetWidth() or 18
     local barHeight = bar:GetHeight() or 512
-    local innerLength = math.max(1, (horizontal and barWidth or barHeight) - 4)
+    local innerLength = math.max(1, (horizontal and barWidth or barHeight) - (TRACK_INSET * 2))
     local thickness = math.max(8, horizontal and barHeight or barWidth)
     local fillRatio = maxHonor > 0 and Clamp(currentHonor / maxHonor, 0, 1) or 0
 
@@ -795,14 +786,14 @@ function Honor.Refresh(force)
     if realizedRatio > 0 then
         if horizontal then
             bar.fill:SetTexCoord(0, 1, 0, 1)
-            bar.fill:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -2)
-            bar.fill:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 2, 2)
-            bar.fill:SetWidth(math.max(1, innerLength * realizedRatio))
+            bar.fill:SetPoint("TOPLEFT", bar, "TOPLEFT", TRACK_INSET, -TRACK_INSET)
+            bar.fill:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", TRACK_INSET, TRACK_INSET)
+            bar.fill:SetWidth(innerLength * realizedRatio)
         else
             bar.fill:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0)
-            bar.fill:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 2, 2)
-            bar.fill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -2, 2)
-            bar.fill:SetHeight(math.max(1, innerLength * realizedRatio))
+            bar.fill:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", TRACK_INSET, TRACK_INSET)
+            bar.fill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -TRACK_INSET, TRACK_INSET)
+            bar.fill:SetHeight(innerLength * realizedRatio)
         end
         bar.fill:Show()
     else
@@ -813,31 +804,31 @@ function Honor.Refresh(force)
     bar.unrealizedStripes:ClearAllPoints()
     local unrealizedRatio = math.max(0, fillRatio - realizedRatio)
     if unrealizedRatio > 0 then
-        local unrealizedLength = math.max(1, innerLength * unrealizedRatio)
+        local unrealizedLength = innerLength * unrealizedRatio
         local stripeWidth, stripeHeight
-        bar.incompleteOverlay:SetVertexColor(r * 0.42, g * 0.42, b * 0.42, 0.96)
+        bar.incompleteOverlay:SetVertexColor(r * 0.42, g * 0.42, b * 0.42, 1)
         -- The stripes use a brighter version of the same faction hue, not white,
         -- so Alliance stays blue and Horde stays red.
         bar.unrealizedStripes:SetVertexColor(Clamp((r * 1.45) + 0.10, 0, 1), Clamp((g * 1.45) + 0.10, 0, 1), Clamp((b * 1.45) + 0.10, 0, 1), 0.48)
         if horizontal then
-            local x = 2 + (innerLength * realizedRatio)
-            stripeWidth, stripeHeight = unrealizedLength, math.max(1, barHeight - 4)
+            local x = TRACK_INSET + (innerLength * realizedRatio)
+            stripeWidth, stripeHeight = unrealizedLength, math.max(1, barHeight - (TRACK_INSET * 2))
             bar.incompleteOverlay:SetTexCoord(0, 1, 0, 1)
-            bar.incompleteOverlay:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -2)
-            bar.incompleteOverlay:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, 2)
+            bar.incompleteOverlay:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -TRACK_INSET)
+            bar.incompleteOverlay:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, TRACK_INSET)
             bar.incompleteOverlay:SetWidth(unrealizedLength)
-            bar.unrealizedStripes:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -2)
-            bar.unrealizedStripes:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, 2)
+            bar.unrealizedStripes:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -TRACK_INSET)
+            bar.unrealizedStripes:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, TRACK_INSET)
             bar.unrealizedStripes:SetWidth(unrealizedLength)
         else
-            local y = 2 + (innerLength * realizedRatio)
-            stripeWidth, stripeHeight = math.max(1, barWidth - 4), unrealizedLength
+            local y = TRACK_INSET + (innerLength * realizedRatio)
+            stripeWidth, stripeHeight = math.max(1, barWidth - (TRACK_INSET * 2)), unrealizedLength
             bar.incompleteOverlay:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0)
-            bar.incompleteOverlay:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 2, y)
-            bar.incompleteOverlay:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -2, y)
+            bar.incompleteOverlay:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", TRACK_INSET, y)
+            bar.incompleteOverlay:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -TRACK_INSET, y)
             bar.incompleteOverlay:SetHeight(unrealizedLength)
-            bar.unrealizedStripes:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 2, y)
-            bar.unrealizedStripes:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -2, y)
+            bar.unrealizedStripes:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", TRACK_INSET, y)
+            bar.unrealizedStripes:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -TRACK_INSET, y)
             bar.unrealizedStripes:SetHeight(unrealizedLength)
         end
         bar.incompleteOverlay:Show()
@@ -859,12 +850,12 @@ function Honor.Refresh(force)
     if currentHonor > 0 then
         -- Keep both halves of the one-unit line inside the track at 0% / 100%,
         -- including on clients without texture masks.
-        local lineAxis = Clamp(2 + (innerLength * fillRatio), 2.5, 1.5 + innerLength)
+        local lineAxis = Clamp(TRACK_INSET + (innerLength * fillRatio), TRACK_INSET + 0.5, TRACK_INSET + innerLength - 0.5)
         if horizontal then
-            bar.currentLine:SetSize(1, math.max(1, barHeight - 4))
+            bar.currentLine:SetSize(1, math.max(1, barHeight - (TRACK_INSET * 2)))
             bar.currentLine:SetPoint("CENTER", bar, "LEFT", lineAxis, 0)
         else
-            bar.currentLine:SetSize(math.max(1, barWidth - 4), 1)
+            bar.currentLine:SetSize(math.max(1, barWidth - (TRACK_INSET * 2)), 1)
             bar.currentLine:SetPoint("CENTER", bar, "BOTTOM", 0, lineAxis)
         end
         bar.currentLine:Show()
@@ -882,18 +873,18 @@ function Honor.Refresh(force)
         local milestone = milestones[i]
         if marker and milestone and maxHonor > 0 then
             local ratio = Clamp(milestone.honor / maxHonor, 0, 1)
-            local markerAxis = Clamp(2 + (innerLength * ratio), markerSize * 0.5, (horizontal and barWidth or barHeight) - (markerSize * 0.5))
+            local markerAxis = Clamp(TRACK_INSET + (innerLength * ratio), markerSize * 0.5, (horizontal and barWidth or barHeight) - (markerSize * 0.5))
             marker:SetSize(markerSize, markerSize)
             marker.rankIcon:SetSize(iconSize, iconSize)
             marker:ClearAllPoints()
             if horizontal then
                 marker:SetPoint("CENTER", bar, "LEFT", markerAxis, 0)
-                marker.tick:SetSize(1, marker.tickMask and tickLength or math.max(4, tickLength - 4))
+                marker.tick:SetSize(1, marker.tickMask and tickLength or math.max(4, tickLength - (TRACK_INSET * 2)))
                 marker.tick:ClearAllPoints()
                 marker.tick:SetPoint("CENTER", marker, "CENTER", 0, 0)
             else
                 marker:SetPoint("CENTER", bar, "BOTTOM", 0, markerAxis)
-                marker.tick:SetSize(marker.tickMask and tickLength or math.max(4, tickLength - 4), 1)
+                marker.tick:SetSize(marker.tickMask and tickLength or math.max(4, tickLength - (TRACK_INSET * 2)), 1)
                 marker.tick:ClearAllPoints()
                 marker.tick:SetPoint("CENTER", marker, "CENTER", 0, 0)
             end
@@ -933,7 +924,7 @@ function Honor.Refresh(force)
 
     bar.segmentBounds = {}
     if bar.segments then
-        local previousAxis = 2
+        local previousAxis = TRACK_INSET
         for i = 1, 4 do
             local segment = bar.segments[i]
             local milestone = milestones[i]
@@ -943,7 +934,7 @@ function Honor.Refresh(force)
                     local _, _, _, xOffset, yOffset = bar.markers[i]:GetPoint(1)
                     upperAxis = horizontal and xOffset or yOffset
                 else
-                    upperAxis = (horizontal and barWidth or barHeight) - 2
+                    upperAxis = (horizontal and barWidth or barHeight) - TRACK_INSET
                 end
                 upperAxis = tonumber(upperAxis) or previousAxis
                 local lowerAxis = previousAxis

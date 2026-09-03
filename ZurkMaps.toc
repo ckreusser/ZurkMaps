@@ -4,7 +4,7 @@
 ## Notes: Clickable Warsong Gulch, Arathi Basin, and Alterac Valley battleground maps by Zurk
 ## IconTexture: Interface\AddOns\ZurkMaps\Media\Icon.tga
 ## Author: Calvin
-## Version: 1.3.0-r16
+## Version: 1.3.0-r17
 ## SavedVariables: ZurksWSGCalloutMapDB, ZurksABCalloutMapDB, ZurksAVCalloutMapDB, ZurkMapsAVQuickMessagesDB, ZurkMapsPlayerIconsDB, ZurkMapsHonorDB, ZurkMapsAppearanceDB
 
 ZurkMaps_PlayerIcons.lua
@@ -13,13 +13,16 @@ ZurkMaps_PlayerBlips.lua
 ZurkMaps_Promos.lua
 ZurkMaps_Battlecry.lua
 ZurkMaps_BGHistory.lua
+ZurkMaps_InteriorMask.lua
 ZurkMaps_HonorWidget.lua
 ZurkMaps_WSGHonor.lua
 ZurkMaps_ABHonor.lua
 ZurkMaps_AVHonor.lua
 ZurkMaps_AVQuickMessages.lua
+ZurkMaps_CaptureClock.lua
 ZurkMaps_AVTimers.lua
 ZurkMaps_AVLieutenants.lua
+ZurkMaps_MapResize.lua
 ZurkMaps_WSG.lua
 ZurkMaps_AB.lua
 ZurkMaps_AV.lua

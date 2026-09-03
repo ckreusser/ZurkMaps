@@ -2,6 +2,24 @@
 
 All notable changes to Zurk Maps will be documented in this file.
 
+## Zurk Maps 1.3.0-r17
+
+### Changed
+
+- Standardized framed icon and numbered-message buttons across all three maps with thin opaque borders, solid backgrounds, and evenly aligned artwork. Button sizes, positions, and actions are preserved.
+- Matched AB capture timers to AV's fixed-digit `m:ss` clocks and faction-colored completion pulse/fade, preserving AB's capture timing, callouts, and timer positions.
+- Enlarged AB capture clocks by 40% and all AB player blips by 25%, including rank badges, assigned icons, and test previews.
+- Enlarged the callout-channel toggle and fitted the original in-game slider artwork to both track positions.
+
+### Fixed
+
+- Filled map artwork, honor-bar tracks and fills, and AB/AV timer backgrounds to their inner borders using hard interior clipping and oriented corner masks. Timer backgrounds remain fitted throughout their completion animation.
+- Removed feathered honor-bar ends, corner gaps, and unintended border transparency at full opacity.
+- Kept texture masking within the client's three-mask limit and removed unsupported mask-coordinate transforms.
+- Aligned button artwork and backgrounds to the same pixel geometry as their borders, keeping opposite margins even when maps move or scale.
+- Made rank 12–14 Shaman and Paladin class-colored blips use the same pink helmet artwork.
+- Fixed WSG/AB resizing to hold the visible top-left corner in place and track the actual grab point while preserving map proportions and saved layouts.
+
 ## Zurk Maps 1.3.0-r16
 
 ### Added

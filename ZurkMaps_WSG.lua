@@ -96,8 +96,10 @@ frame:SetClampedToScreen(true)
 frame:SetMovable(true)
 
 local map = CreateFrame("Frame", nil, frame)
-map:SetSize(MAP_WIDTH, MAP_HEIGHT)
-map:SetPoint("BOTTOM", frame, "BOTTOM", 0, ACTION_HEIGHT)
+-- Fill to the visible rim (3 units inside the tooltip-border frame). Expand
+-- the coordinate surface with the artwork so hotspots and blips stay aligned.
+map:SetSize(MAP_WIDTH + 4, MAP_HEIGHT + 4)
+map:SetPoint("BOTTOM", frame, "BOTTOM", 0, ACTION_HEIGHT - 2)
 map:EnableMouse(true)
 map:RegisterForDrag("LeftButton")
 
@@ -114,19 +116,24 @@ local mapBorder = CreateFrame(
     map,
     BackdropTemplateMixin and "BackdropTemplate" or nil
 )
-mapBorder:SetPoint("TOPLEFT", map, "TOPLEFT", -5, 5)
-mapBorder:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", 5, -5)
+mapBorder:SetPoint("TOPLEFT", map, "TOPLEFT", -3, 3)
+mapBorder:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", 3, -3)
 
 if mapBorder.SetBackdrop then
     mapBorder:SetBackdrop({
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         edgeSize = 16,
     })
-    mapBorder:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 0.98)
+    mapBorder:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 1)
 end
 
 mapBorder:EnableMouse(false)
 mapBorder:SetFrameLevel(map:GetFrameLevel() + 10)
+
+-- Hard clipping keeps the artwork opaque up to the rim at 100% opacity.
+-- The shared opacity setting still controls transparency for the whole map.
+map.interiorMask = ZurkMapsInteriorMask.Create(map, mapBorder, 3, 4, true)
+ZurkMapsInteriorMask.Apply(map.interiorMask, mapTexture)
 
 if ZurkMapsWSGHonor and ZurkMapsWSGHonor.Create then
     local wsgHonorBar = ZurkMapsWSGHonor.Create(frame, frame, frame:GetHeight(), {
@@ -194,9 +201,7 @@ end
 -- Scale-resize state. Resizing the parent frame scales the map, hotspot geometry,
 -- border, CAP/PICK buttons, and their text together while preserving proportions.
 local resizing = false
-local resizeStartX = 0
-local resizeStartY = 0
-local resizeStartScale = 1
+local resizeState
 
 local MIN_SCALE = 0.55
 local MAX_SCALE = 2.00
@@ -238,25 +243,19 @@ local function RestoreLayout()
     end
 end
 
-local function GetCursorUIPosition()
-    local x, y = GetCursorPosition()
-    local uiScale = UIParent:GetEffectiveScale()
-    return x / uiScale, y / uiScale
-end
-
 local function BeginResize()
     if InCombatLockdown and InCombatLockdown() then
         return
     end
     resizing = true
-    resizeStartX, resizeStartY = GetCursorUIPosition()
-    resizeStartScale = frame:GetScale()
+    resizeState = ZurkMapsMapResize.Begin(frame, mapBorder)
     GameTooltip:Hide()
 end
 
 local function EndResize()
     if resizing then
         resizing = false
+        resizeState = nil
         SaveLayout()
         if ConfigureFriendlyPlayerDots then
             ConfigureFriendlyPlayerDots()
@@ -312,17 +311,7 @@ resizeHandle:SetScript("OnUpdate", function(self, elapsed)
         return
     end
 
-    local x, y = GetCursorUIPosition()
-    local dx = x - resizeStartX
-    local dy = resizeStartY - y
-
-    -- Use both horizontal and vertical movement, preserving the addon's aspect ratio.
-    local scaleFromX = resizeStartScale + (dx / MAP_WIDTH)
-    local scaleFromY = resizeStartScale + (dy / MAP_HEIGHT)
-    local newScale = (scaleFromX + scaleFromY) / 2
-
-    newScale = math.max(MIN_SCALE, math.min(MAX_SCALE, newScale))
-    frame:SetScale(newScale)
+    local newScale = ZurkMapsMapResize.Update(frame, resizeState, MIN_SCALE, MAX_SCALE)
     UpdateMoveHandleScale(newScale)
 end)
 
@@ -1492,41 +1481,6 @@ end)
 
 UpdateMoveHandleScale(frame:GetScale())
 
--- Solid-color icon framing stays crisp even when the addon is scaled down.
-local function CreateCrispIconBorder(button)
-    local border = CreateFrame("Frame", nil, button)
-    border:SetAllPoints()
-    border:SetFrameLevel(button:GetFrameLevel() + 2)
-    border:EnableMouse(false)
-
-    local function Edge(point1, relativePoint1, x1, y1, point2, relativePoint2, x2, y2, width, height, r, g, b, a)
-        local texture = border:CreateTexture(nil, "OVERLAY")
-        texture:SetPoint(point1, border, relativePoint1, x1, y1)
-        if point2 then
-            texture:SetPoint(point2, border, relativePoint2, x2, y2)
-        end
-        if width then texture:SetWidth(width) end
-        if height then texture:SetHeight(height) end
-        texture:SetColorTexture(r, g, b, a)
-        return texture
-    end
-
-    -- Two-unit translucent brown-black outer frame. This is about 35% thinner
-    -- than the previous black edge and blends with the map's bronze theme.
-    Edge("TOPLEFT", "TOPLEFT", 0, 0, "TOPRIGHT", "TOPRIGHT", 0, 0, nil, 2, 0.055, 0.035, 0.018, 0.68)
-    Edge("BOTTOMLEFT", "BOTTOMLEFT", 0, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, 0, nil, 2, 0.055, 0.035, 0.018, 0.68)
-    Edge("TOPLEFT", "TOPLEFT", 0, 0, "BOTTOMLEFT", "BOTTOMLEFT", 0, 0, 2, nil, 0.055, 0.035, 0.018, 0.68)
-    Edge("TOPRIGHT", "TOPRIGHT", 0, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, 0, 2, nil, 0.055, 0.035, 0.018, 0.68)
-
-    -- Thin bronze inner frame.
-    Edge("TOPLEFT", "TOPLEFT", 2, -2, "TOPRIGHT", "TOPRIGHT", -2, -2, nil, 2, 0.70, 0.52, 0.20, 0.92)
-    Edge("BOTTOMLEFT", "BOTTOMLEFT", 2, 2, "BOTTOMRIGHT", "BOTTOMRIGHT", -2, 2, nil, 2, 0.70, 0.52, 0.20, 0.92)
-    Edge("TOPLEFT", "TOPLEFT", 2, -2, "BOTTOMLEFT", "BOTTOMLEFT", 2, 2, 2, nil, 0.70, 0.52, 0.20, 0.92)
-    Edge("TOPRIGHT", "TOPRIGHT", -2, -2, "BOTTOMRIGHT", "BOTTOMRIGHT", -2, 2, 2, nil, 0.70, 0.52, 0.20, 0.92)
-
-    return border
-end
-
 -- Calibration from Blizzard battlefield coordinates to the custom Zurk WSG map.
 -- Blizzard's native battlefield coordinate space is noticeably narrower on X
 -- and taller on Y than the portrait map art used here. These values are based
@@ -1821,8 +1775,8 @@ local function CloseTurtleMenu()
         turtleIcon:SetAlpha(1)
         turtleBorder:SetAlpha(1)
     elseif turtleIcon and turtleBorder then
-        turtleIcon:SetAlpha(0.82)
-        turtleBorder:SetAlpha(0.96)
+        turtleIcon:SetAlpha(1)
+        turtleBorder:SetAlpha(1)
     end
 end
 
@@ -1835,17 +1789,16 @@ turtleButton:RegisterForClicks("LeftButtonUp")
 
 local turtleBackground = turtleButton:CreateTexture(nil, "BACKGROUND")
 turtleBackground:SetAllPoints()
-turtleBackground:SetColorTexture(0.08, 0.055, 0.025, 0.72)
+turtleBackground:SetColorTexture(0.08, 0.055, 0.025, 1)
 
 turtleIcon = turtleButton:CreateTexture(nil, "ARTWORK")
-turtleIcon:SetPoint("TOPLEFT", turtleButton, "TOPLEFT", 4, -4)
-turtleIcon:SetPoint("BOTTOMRIGHT", turtleButton, "BOTTOMRIGHT", -4, 4)
 turtleIcon:SetTexture("Interface\\Icons\\Ability_Hunter_Pet_Turtle")
 turtleIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-turtleIcon:SetAlpha(0.82)
+turtleIcon:SetAlpha(1)
 
-turtleBorder = CreateCrispIconBorder(turtleButton)
-turtleBorder:SetAlpha(0.96)
+turtleBorder = ZurkMapsBattlecry.CreateButtonBorder(turtleButton)
+turtleBorder:FitContent(turtleBackground, turtleIcon, 1)
+turtleBorder:SetAlpha(1)
 
 turtleButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 turtleButton:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
@@ -1959,8 +1912,8 @@ turtleButton:SetScript("OnLeave", function()
         turtleIcon:SetAlpha(1)
         turtleBorder:SetAlpha(1)
     else
-        turtleIcon:SetAlpha(0.82)
-        turtleBorder:SetAlpha(0.96)
+        turtleIcon:SetAlpha(1)
+        turtleBorder:SetAlpha(1)
     end
     GameTooltip:Hide()
 end)
@@ -2475,8 +2428,8 @@ local function CloseFocusMenu()
         focusIcon:SetAlpha(1)
         focusBorder:SetAlpha(1)
     elseif focusIcon and focusBorder then
-        focusIcon:SetAlpha(0.82)
-        focusBorder:SetAlpha(0.96)
+        focusIcon:SetAlpha(1)
+        focusBorder:SetAlpha(1)
     end
 end
 
@@ -2488,17 +2441,16 @@ focusButton:RegisterForClicks("LeftButtonUp")
 
 local focusBackground = focusButton:CreateTexture(nil, "BACKGROUND")
 focusBackground:SetAllPoints()
-focusBackground:SetColorTexture(0.08, 0.055, 0.025, 0.72)
+focusBackground:SetColorTexture(0.08, 0.055, 0.025, 1)
 
 focusIcon = focusButton:CreateTexture(nil, "ARTWORK")
-focusIcon:SetPoint("TOPLEFT", focusButton, "TOPLEFT", 4, -4)
-focusIcon:SetPoint("BOTTOMRIGHT", focusButton, "BOTTOMRIGHT", -4, 4)
 focusIcon:SetTexture("Interface\\Icons\\Ability_Hunter_SniperShot")
 focusIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-focusIcon:SetAlpha(0.82)
+focusIcon:SetAlpha(1)
 
-focusBorder = CreateCrispIconBorder(focusButton)
-focusBorder:SetAlpha(0.96)
+focusBorder = ZurkMapsBattlecry.CreateButtonBorder(focusButton)
+focusBorder:FitContent(focusBackground, focusIcon, 1)
+focusBorder:SetAlpha(1)
 
 focusButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 focusButton:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
@@ -2651,8 +2603,8 @@ focusButton:SetScript("OnLeave", function()
         focusIcon:SetAlpha(1)
         focusBorder:SetAlpha(1)
     else
-        focusIcon:SetAlpha(0.82)
-        focusBorder:SetAlpha(0.96)
+        focusIcon:SetAlpha(1)
+        focusBorder:SetAlpha(1)
     end
     GameTooltip:Hide()
 end)
@@ -2689,24 +2641,23 @@ eyesButton:RegisterForClicks("LeftButtonUp")
 
 local eyesBackground = eyesButton:CreateTexture(nil, "BACKGROUND")
 eyesBackground:SetAllPoints()
-eyesBackground:SetColorTexture(0.08, 0.055, 0.025, 0.52)
+eyesBackground:SetColorTexture(0.08, 0.055, 0.025, 1)
 
 local eyesIcon = eyesButton:CreateTexture(nil, "ARTWORK")
-eyesIcon:SetPoint("TOPLEFT", eyesButton, "TOPLEFT", 3, -3)
-eyesIcon:SetPoint("BOTTOMRIGHT", eyesButton, "BOTTOMRIGHT", -3, 3)
 eyesIcon:SetTexture("Interface\\Icons\\Spell_Shadow_EvilEye")
 eyesIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-eyesIcon:SetAlpha(0.68)
+eyesIcon:SetAlpha(1)
 
-local eyesBorder = CreateCrispIconBorder(eyesButton)
-eyesBorder:SetAlpha(0.72)
+local eyesBorder = ZurkMapsBattlecry.CreateButtonBorder(eyesButton)
+eyesBorder:FitContent(eyesBackground, eyesIcon, 1)
+eyesBorder:SetAlpha(1)
 
 eyesButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 eyesButton:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
 
 eyesButton:SetScript("OnEnter", function(self)
-    eyesIcon:SetAlpha(0.90)
-    eyesBorder:SetAlpha(0.90)
+    eyesIcon:SetAlpha(1)
+    eyesBorder:SetAlpha(1)
 
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetText("Eyes on the EFC")
@@ -2715,8 +2666,8 @@ eyesButton:SetScript("OnEnter", function(self)
 end)
 
 eyesButton:SetScript("OnLeave", function()
-    eyesIcon:SetAlpha(0.68)
-    eyesBorder:SetAlpha(0.72)
+    eyesIcon:SetAlpha(1)
+    eyesBorder:SetAlpha(1)
     GameTooltip:Hide()
 end)
 
@@ -2727,7 +2678,7 @@ eyesButton:SetScript("OnClick", function()
     Report("Anyone got eyes on the EFC??")
 end)
 
--- WSG Battlecry: same compact size/transparency as EYES, directly above it.
+-- WSG Battlecry: same compact size as EYES, directly above it.
 -- The editor logic lives in ZurkMaps_Battlecry.lua to preserve local-variable headroom.
 _G.ZurkMapsWSGBattlecry = ZurkMapsBattlecry and ZurkMapsBattlecry.Create({
     frame = frame,
@@ -2736,11 +2687,11 @@ _G.ZurkMapsWSGBattlecry = ZurkMapsBattlecry and ZurkMapsBattlecry.Create({
     anchorButton = eyesButton,
     buttonGap = 5,
     buttonSize = EYES_BUTTON_SIZE,
-    backgroundAlpha = 0.52,
-    iconAlpha = 0.68,
-    borderAlpha = 0.72,
-    hoverAlpha = 0.90,
-    createBorder = CreateCrispIconBorder,
+    backgroundAlpha = 1,
+    iconAlpha = 1,
+    borderAlpha = 1,
+    hoverAlpha = 1,
+    createBorder = ZurkMapsBattlecry.CreateButtonBorder,
     db = ZurksWSGCalloutMapDB,
     dbKey = "battlecryMessage",
     panelName = "ZurkMapsWSGBattlecryTooltip",

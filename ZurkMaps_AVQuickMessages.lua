@@ -318,14 +318,10 @@ function Quick.Create(options)
         end
     end
 
-    quick.stackOuter = CreateFrame("Frame", nil, quick.map, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    quick.stackOuter = CreateFrame("Frame", nil, quick.map)
     quick.stackOuter:SetSize(quick.width + 2, (quick.cellHeight * quick.count) + 2)
     quick.stackOuter:SetPoint("TOPRIGHT", quick.map, "TOPRIGHT", -5, -5)
     quick.stackOuter:SetFrameLevel(quick.mapBorder:GetFrameLevel() + 4)
-    if quick.stackOuter.SetBackdrop then
-        quick.stackOuter:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
-        quick.stackOuter:SetBackdropBorderColor(0.035, 0.022, 0.012, 1)
-    end
 
     quick.stack = CreateFrame("Frame", nil, quick.stackOuter)
     quick.stack:SetSize(quick.width, quick.cellHeight * quick.count)
@@ -333,23 +329,18 @@ function Quick.Create(options)
     quick.stack:SetFrameLevel(quick.mapBorder:GetFrameLevel() + 5)
 
     for i = 1, quick.count do
-        local button = CreateFrame("Button", nil, quick.stack, BackdropTemplateMixin and "BackdropTemplate" or nil)
+        local button = CreateFrame("Button", nil, quick.stack)
         button:SetSize(quick.width, quick.cellHeight)
         button:SetPoint("TOP", quick.stack, "TOP", 0, -((i - 1) * quick.cellHeight))
         button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         button.slot = i
 
-        if button.SetBackdrop then
-            button:SetBackdrop({
-                bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-                edgeFile = "Interface\\Buttons\\WHITE8X8",
-                tile = false,
-                edgeSize = 1,
-                insets = { left = 1, right = 1, top = 1, bottom = 1 },
-            })
-            button:SetBackdropColor(0.028, 0.019, 0.010, 0.90)
-            button:SetBackdropBorderColor(0.62, 0.46, 0.27, 0.95)
-        end
+        button.background = button:CreateTexture(nil, "BACKGROUND")
+        button.background:SetAllPoints()
+        button.background:SetColorTexture(0.08, 0.055, 0.025, 1)
+        -- Match the compact AV Battlecry border, including after map scaling.
+        button.border = ZurkMapsBattlecry.CreateButtonBorder(button)
+        button.border:FitContent(button.background, nil, 0)
 
         button.text = button:CreateFontString(nil, "OVERLAY")
         button.text:SetPoint("CENTER", button, "CENTER", 0, 0)

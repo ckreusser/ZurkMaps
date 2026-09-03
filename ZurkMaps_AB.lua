@@ -19,7 +19,6 @@ local hoverAccumulator = 0
 local manualVisibility = nil
 local pendingVisibilityUpdate = false
 local ConfigureFriendlyPlayerDots = nil
-local ConfigureContestTimerScale = nil
 local ConfigureBattlecryPanel = nil
 local RefreshBaseNodes = nil
 local hoveredBaseNode = nil
@@ -581,11 +580,16 @@ if mapBorder.SetBackdrop then
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         edgeSize = 16,
     })
-    mapBorder:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 0.98)
+    mapBorder:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 1)
 end
 
 mapBorder:EnableMouse(false)
 mapBorder:SetFrameLevel(map:GetFrameLevel() + 10)
+
+-- Keep the artwork opaque up to the rim at 100%, with the shared opacity
+-- setting controlling transparency and hard clipping containing the overscan.
+map.interiorMask = ZurkMapsInteriorMask.Create(map, mapBorder, 3, 4, true)
+ZurkMapsInteriorMask.Apply(map.interiorMask, mapTexture)
 
 if ZurkMapsABHonor and ZurkMapsABHonor.Create then
     local abHonorBar = ZurkMapsABHonor.Create(mapBorder, frame, MAP_HEIGHT, {
@@ -761,9 +765,7 @@ end
 
 local MIN_SCALE = 0.55
 local MAX_SCALE = 2.00
-local resizeStartX = 0
-local resizeStartY = 0
-local resizeStartScale = 1
+local resizeState
 
 local function UpdateMoveHandleScale(addonScale)
     -- Match the WSG plaque behavior: below 100% addon scale, keep the title
@@ -781,9 +783,6 @@ local function UpdateMoveHandleScale(addonScale)
 
     if ConfigureFriendlyPlayerDots then
         ConfigureFriendlyPlayerDots()
-    end
-    if ConfigureContestTimerScale then
-        ConfigureContestTimerScale(addonScale)
     end
     if ConfigureBattlecryPanel then
         ConfigureBattlecryPanel(addonScale)
@@ -816,12 +815,6 @@ local function RestoreLayout()
         frame:ClearAllPoints()
         frame:SetPoint(p.point, UIParent, p.relativePoint, p.x, p.y)
     end
-end
-
-local function GetCursorUIPosition()
-    local x, y = GetCursorPosition()
-    local uiScale = UIParent:GetEffectiveScale()
-    return x / uiScale, y / uiScale
 end
 
 local function StartMove()
@@ -909,8 +902,7 @@ local function BeginResize()
     end
 
     resizing = true
-    resizeStartX, resizeStartY = GetCursorUIPosition()
-    resizeStartScale = frame:GetScale()
+    resizeState = ZurkMapsMapResize.Begin(frame, mapBorder)
     hoveredZone = nil
     highlightTexture:Hide()
     GameTooltip:Hide()
@@ -922,6 +914,7 @@ local function EndResize()
     end
 
     resizing = false
+    resizeState = nil
     SaveLayout()
 end
 
@@ -968,15 +961,7 @@ resizeHandle:SetScript("OnUpdate", function(self, elapsed)
         return
     end
 
-    local x, y = GetCursorUIPosition()
-    local dx = x - resizeStartX
-    local dy = resizeStartY - y
-    local scaleFromX = resizeStartScale + (dx / MAP_WIDTH)
-    local scaleFromY = resizeStartScale + (dy / MAP_HEIGHT)
-    local newScale = (scaleFromX + scaleFromY) / 2
-
-    newScale = math.max(MIN_SCALE, math.min(MAX_SCALE, newScale))
-    frame:SetScale(newScale)
+    local newScale = ZurkMapsMapResize.Update(frame, resizeState, MIN_SCALE, MAX_SCALE)
     UpdateMoveHandleScale(newScale)
 end)
 
@@ -1053,35 +1038,6 @@ function focusCallout:GetClassDisplayName(classInfo)
     return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classInfo.token]) or classInfo.name
 end
 
-function focusCallout:CreateCrispIconBorder(button)
-    local border = CreateFrame("Frame", nil, button)
-    border:SetAllPoints()
-    border:SetFrameLevel(button:GetFrameLevel() + 2)
-    border:EnableMouse(false)
-
-    local function Edge(point1, relativePoint1, x1, y1, point2, relativePoint2, x2, y2, width, height, r, g, b, a)
-        local texture = border:CreateTexture(nil, "OVERLAY")
-        texture:SetPoint(point1, border, relativePoint1, x1, y1)
-        if point2 then
-            texture:SetPoint(point2, border, relativePoint2, x2, y2)
-        end
-        if width then texture:SetWidth(width) end
-        if height then texture:SetHeight(height) end
-        texture:SetColorTexture(r, g, b, a)
-        return texture
-    end
-
-    Edge("TOPLEFT", "TOPLEFT", 0, 0, "TOPRIGHT", "TOPRIGHT", 0, 0, nil, 2, 0.055, 0.035, 0.018, 0.68)
-    Edge("BOTTOMLEFT", "BOTTOMLEFT", 0, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, 0, nil, 2, 0.055, 0.035, 0.018, 0.68)
-    Edge("TOPLEFT", "TOPLEFT", 0, 0, "BOTTOMLEFT", "BOTTOMLEFT", 0, 0, 2, nil, 0.055, 0.035, 0.018, 0.68)
-    Edge("TOPRIGHT", "TOPRIGHT", 0, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, 0, 2, nil, 0.055, 0.035, 0.018, 0.68)
-    Edge("TOPLEFT", "TOPLEFT", 2, -2, "TOPRIGHT", "TOPRIGHT", -2, -2, nil, 2, 0.70, 0.52, 0.20, 0.92)
-    Edge("BOTTOMLEFT", "BOTTOMLEFT", 2, 2, "BOTTOMRIGHT", "BOTTOMRIGHT", -2, 2, nil, 2, 0.70, 0.52, 0.20, 0.92)
-    Edge("TOPLEFT", "TOPLEFT", 2, -2, "BOTTOMLEFT", "BOTTOMLEFT", 2, 2, 2, nil, 0.70, 0.52, 0.20, 0.92)
-    Edge("TOPRIGHT", "TOPRIGHT", -2, -2, "BOTTOMRIGHT", "BOTTOMRIGHT", -2, 2, 2, nil, 0.70, 0.52, 0.20, 0.92)
-    return border
-end
-
 function focusCallout:CloseMenu()
     if self.menu then self.menu:Hide() end
     if self.dismiss then self.dismiss:Hide() end
@@ -1091,8 +1047,8 @@ function focusCallout:CloseMenu()
         self.icon:SetAlpha(1)
         self.border:SetAlpha(1)
     elseif self.icon and self.border then
-        self.icon:SetAlpha(0.82)
-        self.border:SetAlpha(0.96)
+        self.icon:SetAlpha(1)
+        self.border:SetAlpha(1)
     end
 end
 
@@ -1143,17 +1099,16 @@ focusCallout.button:RegisterForClicks("LeftButtonUp")
 
 focusCallout.background = focusCallout.button:CreateTexture(nil, "BACKGROUND")
 focusCallout.background:SetAllPoints()
-focusCallout.background:SetColorTexture(0.08, 0.055, 0.025, 0.72)
+focusCallout.background:SetColorTexture(0.08, 0.055, 0.025, 1)
 
 focusCallout.icon = focusCallout.button:CreateTexture(nil, "ARTWORK")
-focusCallout.icon:SetPoint("TOPLEFT", focusCallout.button, "TOPLEFT", 2, -2)
-focusCallout.icon:SetPoint("BOTTOMRIGHT", focusCallout.button, "BOTTOMRIGHT", -2, 2)
 focusCallout.icon:SetTexture("Interface\\Icons\\Ability_Hunter_SniperShot")
-focusCallout.icon:SetTexCoord(0.04, 0.96, 0.04, 0.96)
-focusCallout.icon:SetAlpha(0.82)
+focusCallout.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+focusCallout.icon:SetAlpha(1)
 
-focusCallout.border = focusCallout:CreateCrispIconBorder(focusCallout.button)
-focusCallout.border:SetAlpha(0.96)
+focusCallout.border = ZurkMapsBattlecry.CreateButtonBorder(focusCallout.button)
+focusCallout.border:FitContent(focusCallout.background, focusCallout.icon, 1)
+focusCallout.border:SetAlpha(1)
 focusCallout.button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 focusCallout.button:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
 
@@ -1261,8 +1216,8 @@ focusCallout.button:SetScript("OnLeave", function()
         focusCallout.icon:SetAlpha(1)
         focusCallout.border:SetAlpha(1)
     else
-        focusCallout.icon:SetAlpha(0.82)
-        focusCallout.border:SetAlpha(0.96)
+        focusCallout.icon:SetAlpha(1)
+        focusCallout.border:SetAlpha(1)
     end
     GameTooltip:Hide()
 end)
@@ -1441,17 +1396,16 @@ battlecry.button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
 battlecry.background = battlecry.button:CreateTexture(nil, "BACKGROUND")
 battlecry.background:SetAllPoints()
-battlecry.background:SetColorTexture(0.08, 0.055, 0.025, 0.72)
+battlecry.background:SetColorTexture(0.08, 0.055, 0.025, 1)
 
 battlecry.icon = battlecry.button:CreateTexture(nil, "ARTWORK")
-battlecry.icon:SetPoint("TOPLEFT", battlecry.button, "TOPLEFT", 2, -2)
-battlecry.icon:SetPoint("BOTTOMRIGHT", battlecry.button, "BOTTOMRIGHT", -2, 2)
 battlecry.icon:SetTexture(battlecry:GetIconTexture())
-battlecry.icon:SetTexCoord(0.04, 0.96, 0.04, 0.96)
-battlecry.icon:SetAlpha(0.82)
+battlecry.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+battlecry.icon:SetAlpha(1)
 
-battlecry.border = focusCallout:CreateCrispIconBorder(battlecry.button)
-battlecry.border:SetAlpha(0.96)
+battlecry.border = ZurkMapsBattlecry.CreateButtonBorder(battlecry.button)
+battlecry.border:FitContent(battlecry.background, battlecry.icon, 1)
+battlecry.border:SetAlpha(1)
 battlecry.button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 battlecry.button:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
 
@@ -1577,8 +1531,8 @@ battlecry.button:SetScript("OnEnter", function(self)
 end)
 
 battlecry.button:SetScript("OnLeave", function()
-    battlecry.icon:SetAlpha(0.82)
-    battlecry.border:SetAlpha(0.96)
+    battlecry.icon:SetAlpha(1)
+    battlecry.border:SetAlpha(1)
     GameTooltip:Hide()
 end)
 
@@ -2173,26 +2127,14 @@ for _, baseNode in ipairs(BASE_NODES) do
     UpdateBaseNodeHighlightColor(baseNode)
 end
 
--- Experimental contested-base visualization. It uses the five base hotspot shapes
+-- Contested-base visualization. It uses the five base hotspot shapes
 -- as persistent illumination masks while a base is contested, independent of hover.
--- The hotspot colors are intended to track the same faction color family as the
--- countdown frame borders so the two read as one connected alert.
+-- Hotspots retain AB's assault-faction colors; clocks use AV's gold countdown
+-- border and faction-colored completion pulse.
 local ALLIANCE_CONTEST_R, ALLIANCE_CONTEST_G, ALLIANCE_CONTEST_B = 0.12, 0.36, 1.00 -- vivid royal Alliance blue
 local HORDE_CONTEST_R, HORDE_CONTEST_G, HORDE_CONTEST_B = 1.00, 0.20, 0.16
-local CONTEST_TIMER_FONT_SIZE = 13
-local CONTEST_TIMER_FRAME_SIZE = 29
-local CONTEST_TIMER_NORMAL_R, CONTEST_TIMER_NORMAL_G, CONTEST_TIMER_NORMAL_B = 0.96, 0.93, 0.84
-local CONTEST_TIMER_WARNING_R, CONTEST_TIMER_WARNING_G, CONTEST_TIMER_WARNING_B = 1.00, 0.82, 0.12
-local CONTEST_FINISH_FLOURISH_SECONDS = 1.0
-local CONTEST_TIMER_FRAME_EDGE_ALPHA = 0.98
-local CONTEST_TIMER_FRAME_BG_ALPHA = 0.00
-local CONTEST_TIMER_TEXT_BG_ALPHA = 0.68
-local CONTEST_TIMER_TEXT_OFFSET_X = 0
-local CONTEST_TIMER_TEXT_OFFSET_Y = 0
-
--- Fixed square timer-frame positions inside each base hotspot. Keeping the timer
--- centered in a fixed-size Blizzard-art frame stops digit jitter, and each location
--- stays clear of both the node icon and hotspot edge.
+-- Keep the five established AB timer centers while sharing AV's compact clock.
+local CONTEST_TIMER_SCALE = 1.40
 local CONTEST_TIMER_POSITIONS = {
     STABLES = { x = 21.50, y = 27.80 },
     GOLD_MINE = { x = 73.00, y = 35.00 },
@@ -2238,32 +2180,6 @@ local function GetContestingFaction(baseNode, textureIndex)
     return nil
 end
 
-local function SetContestTimerFrameColor(visual, faction)
-    if not visual or not visual.timerFrame then
-        return
-    end
-
-    local r, g, b
-    if faction == "Alliance" then
-        r, g, b = ALLIANCE_CONTEST_R, ALLIANCE_CONTEST_G, ALLIANCE_CONTEST_B
-    else
-        r, g, b = HORDE_CONTEST_R, HORDE_CONTEST_G, HORDE_CONTEST_B
-    end
-
-    -- Keep the outer square transparent except for its faction-colored Blizzard
-    -- border. The dedicated inner plate directly behind the number is darker than
-    -- the hotspot itself, but not so dark that it feels visually heavy.
-    if visual.timerFrame.SetBackdropBorderColor then
-        visual.timerFrame:SetBackdropBorderColor(r, g, b, CONTEST_TIMER_FRAME_EDGE_ALPHA)
-    end
-    if visual.timerFrame.SetBackdropColor then
-        visual.timerFrame:SetBackdropColor(0, 0, 0, CONTEST_TIMER_FRAME_BG_ALPHA)
-    end
-    if visual.timerTextBG then
-        visual.timerTextBG:SetVertexColor(0.06, 0.06, 0.06, CONTEST_TIMER_TEXT_BG_ALPHA)
-    end
-end
-
 local function HideContestedBase(baseID)
     local state = contestedBaseStates[baseID]
     local visual = contestedBaseVisuals[baseID]
@@ -2275,16 +2191,17 @@ local function HideContestedBase(baseID)
         state.poiID = nil
         state.timerExpired = false
         state.expiredFaction = nil
+        state.animationStart = nil
     end
     if visual then
         visual.texture:Hide()
+        ZurkMapsCaptureClock.Reset(visual.timerFrame)
         visual.timerFrame:Hide()
-        visual.timerText:Hide()
     end
     UpdateBaseNodeHighlightColor(BASE_NODE_BY_ID[baseID])
 end
 
-local function FinishContestedBase(baseID)
+local function FinishContestedBase(baseID, completionFaction)
     local state = contestedBaseStates[baseID]
     local visual = contestedBaseVisuals[baseID]
     if state then
@@ -2292,14 +2209,16 @@ local function FinishContestedBase(baseID)
         state.timerExpired = true
         state.expiredFaction = state.faction
         state.endTime = nil
+        state.animationStart = GetTime()
     end
     if visual then
         visual.texture:Hide()
         visual.texture:SetAlpha(1)
-        visual.timerFrame:Hide()
-        visual.timerFrame:SetAlpha(1)
-        visual.timerText:Hide()
-        visual.timerText:SetAlpha(1)
+        ZurkMapsCaptureClock.Complete(visual.timerFrame, completionFaction or (state and state.faction))
+        if hoveredContestTimerFrame == visual.timerFrame then
+            hoveredContestTimerFrame = nil
+            GameTooltip:Hide()
+        end
     end
 
     -- In /ab test, a completed assault resolves into full ownership by the same
@@ -2330,6 +2249,7 @@ local function StartContestedBase(baseNode, faction, durationSeconds, source, po
     state.timerSource = source or "local"
     state.timerExpired = false
     state.expiredFaction = nil
+    state.animationStart = nil
     state.endTime = durationSeconds and (GetTime() + math.max(0, durationSeconds)) or nil
     UpdateBaseNodeHighlightColor(baseNode)
 
@@ -2338,15 +2258,11 @@ local function StartContestedBase(baseNode, faction, durationSeconds, source, po
     else
         visual.texture:SetVertexColor(HORDE_CONTEST_R, HORDE_CONTEST_G, HORDE_CONTEST_B, 1)
     end
-    SetContestTimerFrameColor(visual, faction)
-    visual.timerText:SetTextColor(CONTEST_TIMER_NORMAL_R, CONTEST_TIMER_NORMAL_G, CONTEST_TIMER_NORMAL_B, 1)
-
+    ZurkMapsCaptureClock.Reset(visual.timerFrame)
+    ZurkMapsCaptureClock.SetRemaining(visual.timerFrame, durationSeconds)
     visual.texture:SetAlpha(1)
-    visual.timerFrame:SetAlpha(1)
-    visual.timerText:SetAlpha(1)
     visual.texture:Show()
     visual.timerFrame:Show()
-    visual.timerText:Show()
 end
 
 UpdateContestedBaseState = function(baseNode, textureIndex, poiID)
@@ -2354,7 +2270,16 @@ UpdateContestedBaseState = function(baseNode, textureIndex, poiID)
     local state = contestedBaseStates[baseNode.id]
 
     if not faction then
-        HideContestedBase(baseNode.id)
+        local offset = (tonumber(textureIndex) or baseNode.neutralTextureIndex) - baseNode.neutralTextureIndex
+        local owner = offset == 2 and "Alliance" or (offset == 4 and "Horde" or nil)
+        if state and state.active and owner then
+            -- A confirmed capture or defense completes the clock immediately.
+            FinishContestedBase(baseNode.id, owner)
+        elseif state and state.animationStart and owner then
+            ZurkMapsCaptureClock.SetBorderColor(contestedBaseVisuals[baseNode.id].timerFrame, owner)
+        else
+            HideContestedBase(baseNode.id)
+        end
         return
     end
 
@@ -2384,6 +2309,7 @@ for _, baseNode in ipairs(BASE_NODES) do
         poiID = nil,
         timerExpired = false,
         expiredFaction = nil,
+        animationStart = nil,
     }
 
     local visual = {}
@@ -2394,75 +2320,19 @@ for _, baseNode in ipairs(BASE_NODES) do
     visual.texture:Hide()
 
     local timerPosition = CONTEST_TIMER_POSITIONS[baseNode.id] or { x = baseNode.x, y = baseNode.y + 7 }
-    visual.timerFrame = CreateFrame(
-        "Button",
-        nil,
-        map,
-        BackdropTemplateMixin and "BackdropTemplate" or nil
-    )
-    visual.timerFrame:SetSize(CONTEST_TIMER_FRAME_SIZE, CONTEST_TIMER_FRAME_SIZE)
+    visual.timerFrame = ZurkMapsCaptureClock.Create(map, mapBorder:GetFrameLevel() + 6)
+    visual.timerFrame:SetScale(CONTEST_TIMER_SCALE)
+    -- Anchor offsets use the clock's scale; compensate to keep its map center.
     visual.timerFrame:SetPoint(
         "CENTER",
         map,
         "TOPLEFT",
-        (timerPosition.x / 100) * MAP_WIDTH,
-        -(timerPosition.y / 100) * MAP_HEIGHT
+        (timerPosition.x / 100) * MAP_WIDTH / CONTEST_TIMER_SCALE,
+        -(timerPosition.y / 100) * MAP_HEIGHT / CONTEST_TIMER_SCALE
     )
-    visual.timerFrame:SetFrameLevel(mapBorder:GetFrameLevel() + 6)
     visual.timerFrame.baseNode = baseNode
     visual.timerFrame:EnableMouse(true)
     visual.timerFrame:RegisterForClicks("LeftButtonUp")
-    visual.timerFrame:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-    local timerHighlight = visual.timerFrame:GetHighlightTexture()
-    if timerHighlight then
-        timerHighlight:SetAlpha(0.38)
-        timerHighlight:SetAllPoints(visual.timerFrame)
-    end
-
-    -- Square timer frame made entirely from existing Blizzard UI art. The border
-    -- remains faction-colored, while a dedicated dark inner plate sits directly
-    -- behind the digits so the number itself reads as the highest-contrast element.
-    if visual.timerFrame.SetBackdrop then
-        visual.timerFrame:SetBackdrop({
-            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 8,
-            edgeSize = 9,
-            insets = { left = 3, right = 3, top = 3, bottom = 3 },
-        })
-    end
-
-    visual.timerTextBG = visual.timerFrame:CreateTexture(nil, "ARTWORK")
-    visual.timerTextBG:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
-
-    -- Lumber Mill's inner dark timer plate was visually too narrow on the left
-    -- and right. Widen only its horizontal coverage while keeping the same top
-    -- and bottom inset as every other base.
-    local timerTextBGInsetX = (baseNode.id == "LUMBER_MILL") and 1 or 3
-    local timerTextBGInsetY = 3
-    visual.timerTextBG:SetPoint("TOPLEFT", visual.timerFrame, "TOPLEFT", timerTextBGInsetX, -timerTextBGInsetY)
-    visual.timerTextBG:SetPoint("BOTTOMRIGHT", visual.timerFrame, "BOTTOMRIGHT", -timerTextBGInsetX, timerTextBGInsetY)
-
-    visual.timerText = visual.timerFrame:CreateFontString(nil, "OVERLAY")
-    visual.timerText:SetFont("Fonts\\FRIZQT__.TTF", CONTEST_TIMER_FONT_SIZE, "OUTLINE")
-    visual.timerText:SetShadowColor(0, 0, 0, 1)
-    visual.timerText:SetShadowOffset(1, -1)
-    visual.timerText:SetPoint("CENTER", visual.timerFrame, "CENTER", CONTEST_TIMER_TEXT_OFFSET_X, CONTEST_TIMER_TEXT_OFFSET_Y)
-    visual.timerText:SetSize(CONTEST_TIMER_FRAME_SIZE - 4, CONTEST_TIMER_FRAME_SIZE - 8)
-    if visual.timerText.SetWordWrap then
-        visual.timerText:SetWordWrap(false)
-    end
-    if visual.timerText.SetNonSpaceWrap then
-        visual.timerText:SetNonSpaceWrap(false)
-    end
-    if visual.timerText.SetMaxLines then
-        visual.timerText:SetMaxLines(1)
-    end
-    visual.timerText:SetJustifyH("CENTER")
-    visual.timerText:SetJustifyV("MIDDLE")
-    visual.timerText:Hide()
-    visual.timerFrame:Hide()
 
     visual.timerFrame:SetScript("OnClick", function(self, button)
         if button ~= "LeftButton" then
@@ -2512,115 +2382,39 @@ for _, baseNode in ipairs(BASE_NODES) do
     contestedBaseVisuals[baseNode.id] = visual
 end
 
-ConfigureContestTimerScale = function(addonScale)
-    addonScale = tonumber(addonScale) or (frame and frame:GetScale()) or 1
-
-    local fontSize = CONTEST_TIMER_FONT_SIZE
-    local fontFlags = "OUTLINE"
-    local shadowOffsetX, shadowOffsetY = 1, -1
-    local shadowAlpha = 1
-
-    if addonScale < 0.90 then
-        fontSize = CONTEST_TIMER_FONT_SIZE - 1
-    end
-    if addonScale < 0.75 then
-        fontSize = CONTEST_TIMER_FONT_SIZE - 2
-        fontFlags = "OUTLINE,MONOCHROME"
-        shadowOffsetX, shadowOffsetY = 0, 0
-        shadowAlpha = 0.85
-    end
-
-    for _, visual in pairs(contestedBaseVisuals) do
-        if visual.timerText then
-            visual.timerText:SetFont("Fonts\\FRIZQT__.TTF", fontSize, fontFlags)
-            visual.timerText:SetShadowColor(0, 0, 0, shadowAlpha)
-            visual.timerText:SetShadowOffset(shadowOffsetX, shadowOffsetY)
-            visual.timerText:SetSize(CONTEST_TIMER_FRAME_SIZE - 4, CONTEST_TIMER_FRAME_SIZE - 8)
-            if visual.timerText.SetWordWrap then
-                visual.timerText:SetWordWrap(false)
-            end
-            if visual.timerText.SetNonSpaceWrap then
-                visual.timerText:SetNonSpaceWrap(false)
-            end
-            if visual.timerText.SetMaxLines then
-                visual.timerText:SetMaxLines(1)
-            end
-        end
-    end
-end
-
-ConfigureContestTimerScale(frame and frame:GetScale() or 1)
-
 contestAnimationFrame.elapsed = 0
 contestAnimationFrame:SetScript("OnUpdate", function(self, elapsed)
     self.elapsed = self.elapsed + (elapsed or 0)
-    if self.elapsed < 0.05 then return end
-    self.elapsed = 0
+    local updateClock = self.elapsed >= 0.10
+    if updateClock then self.elapsed = self.elapsed % 0.10 end
     local now = GetTime()
     for _, baseNode in ipairs(BASE_NODES) do
         local state = contestedBaseStates[baseNode.id]
         local visual = contestedBaseVisuals[baseNode.id]
-        if state and visual and state.active then
-            if state.endTime then
-                local rawRemaining = state.endTime - now
-
-                if rawRemaining > 0 then
-                    local speed = rawRemaining <= 5 and 9.0 or 4.5
+        if state and visual then
+            if state.animationStart then
+                -- Match AV's smooth border pulse and fade at the existing center.
+                if ZurkMapsCaptureClock.AnimateCompletion(visual.timerFrame, now - state.animationStart) then
+                    state.animationStart = nil
+                end
+            elseif state.active then
+                local rawRemaining = state.endTime and (state.endTime - now) or nil
+                if rawRemaining and rawRemaining <= 0 then
+                    FinishContestedBase(baseNode.id)
+                else
+                    -- AB's faction-colored hotspot illumination stays independent
+                    -- of the steady white clock digits, just as before.
+                    local speed = rawRemaining and rawRemaining <= 5 and 9.0 or 4.5
                     local wave = 0.5 + (0.5 * math.sin(now * speed))
                     if state.faction == "Alliance" then
                         visual.texture:SetAlpha(0.50 + (0.28 * wave))
                     else
                         visual.texture:SetAlpha(0.46 + (0.26 * wave))
                     end
-                    visual.timerFrame:SetAlpha(1)
-                    visual.timerText:SetAlpha(1)
-                    local shownRemaining = math.max(0, math.ceil(rawRemaining))
-                    visual.timerText:SetText(tostring(shownRemaining))
-                    if shownRemaining < 10 then
-                        local textBreath = 0.5 + (0.5 * math.sin(now * speed))
-                        local warningR = CONTEST_TIMER_WARNING_R + ((1.00 - CONTEST_TIMER_WARNING_R) * textBreath)
-                        local warningG = CONTEST_TIMER_WARNING_G + ((0.98 - CONTEST_TIMER_WARNING_G) * textBreath)
-                        local warningB = CONTEST_TIMER_WARNING_B + ((0.58 - CONTEST_TIMER_WARNING_B) * textBreath)
-                        visual.timerText:SetTextColor(warningR, warningG, warningB, 1)
-                    elseif shownRemaining == 10 then
-                        visual.timerText:SetTextColor(CONTEST_TIMER_WARNING_R, CONTEST_TIMER_WARNING_G, CONTEST_TIMER_WARNING_B, 1)
-                    else
-                        visual.timerText:SetTextColor(CONTEST_TIMER_NORMAL_R, CONTEST_TIMER_NORMAL_G, CONTEST_TIMER_NORMAL_B, 1)
-                    end
-                else
-                    -- Hold 0 for one final second of a single breath flourish,
-                    -- then switch the contested visual off cleanly with no fade-out tail.
-                    local flourishAge = now - state.endTime
-                    if flourishAge < CONTEST_FINISH_FLOURISH_SECONDS then
-                        local progress = flourishAge / CONTEST_FINISH_FLOURISH_SECONDS
-                        local breath = math.sin(progress * math.pi)
-                        if state.faction == "Alliance" then
-                            visual.texture:SetAlpha(0.52 + (0.34 * breath))
-                        else
-                            visual.texture:SetAlpha(0.48 + (0.32 * breath))
-                        end
-                        visual.timerFrame:SetAlpha(1)
-                        visual.timerText:SetAlpha(1)
-                        local zeroR = CONTEST_TIMER_WARNING_R + ((1.00 - CONTEST_TIMER_WARNING_R) * breath)
-                        local zeroG = CONTEST_TIMER_WARNING_G + ((0.98 - CONTEST_TIMER_WARNING_G) * breath)
-                        local zeroB = CONTEST_TIMER_WARNING_B + ((0.58 - CONTEST_TIMER_WARNING_B) * breath)
-                        visual.timerText:SetTextColor(zeroR, zeroG, zeroB, 1)
-                        visual.timerText:SetText("0")
-                    else
-                        FinishContestedBase(baseNode.id)
+                    if updateClock then
+                        ZurkMapsCaptureClock.SetRemaining(visual.timerFrame, rawRemaining)
                     end
                 end
-            else
-                local wave = 0.5 + (0.5 * math.sin(now * 4.5))
-                if state.faction == "Alliance" then
-                    visual.texture:SetAlpha(0.50 + (0.28 * wave))
-                else
-                    visual.texture:SetAlpha(0.46 + (0.26 * wave))
-                end
-                visual.timerFrame:SetAlpha(1)
-                visual.timerText:SetAlpha(1)
-                visual.timerText:SetTextColor(CONTEST_TIMER_NORMAL_R, CONTEST_TIMER_NORMAL_G, CONTEST_TIMER_NORMAL_B, 1)
-                visual.timerText:SetText("??")
             end
         end
     end
@@ -2786,7 +2580,7 @@ end)
 -- Friendly-player position overlay. This intentionally mirrors the WSG addon:
 -- Blizzard's native UnitPositionFrame/GroupMembersPinTemplate renders the blips,
 -- while Zurk's map provides the artwork beneath it.
-local AB_FRIENDLY_PLAYER_DOT_SIZE = 10
+local AB_FRIENDLY_PLAYER_DOT_SIZE = 12.5
 local CLASS_COLOR_FALLBACK = {
     WARRIOR = { 0.78, 0.61, 0.43 },
     PALADIN = { 0.96, 0.55, 0.73 },

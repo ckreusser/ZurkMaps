@@ -82,7 +82,9 @@ end
 function PlayerBlips.GetRankBadgeTexture(rankNumber, classToken)
     if UseClassBlips() and rankNumber and rankNumber >= 12 and rankNumber <= 14
         and DEFAULT_CLASS_COLORS[classToken] then
-        return string.format("Interface\\AddOns\\ZurkMaps\\Media\\RankBadges\\Rank%d_%s", rankNumber, classToken)
+        -- Both Classic hybrid classes use the existing pink helmet artwork.
+        local badgeClass = classToken == "SHAMAN" and "PALADIN" or classToken
+        return string.format("Interface\\AddOns\\ZurkMaps\\Media\\RankBadges\\Rank%d_%s", rankNumber, badgeClass)
     end
     return string.format("Interface\\PvPRankBadges\\PvPRank%02d", rankNumber)
 end

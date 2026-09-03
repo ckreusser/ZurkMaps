@@ -95,10 +95,15 @@ mapBorder:SetPoint("TOPLEFT", map, "TOPLEFT", -5, 5)
 mapBorder:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", 5, -5)
 if mapBorder.SetBackdrop then
     mapBorder:SetBackdrop({ edgeFile="Interface\\Tooltips\\UI-Tooltip-Border", edgeSize=16 })
-    mapBorder:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 0.98)
+    mapBorder:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 1)
 end
 mapBorder:EnableMouse(false)
 mapBorder:SetFrameLevel(map:GetFrameLevel() + 10)
+
+-- Preserve the fitted crop and keep the artwork opaque up to the rim at 100%.
+-- Hard clipping contains the overscan; the shared setting controls opacity.
+map.interiorMask = ZurkMapsInteriorMask.Create(map, mapBorder, 3, 4, true)
+ZurkMapsInteriorMask.Apply(map.interiorMask, mapTexture)
 
 local function IsInBattlegroundInstance()
     if type(IsInInstance) ~= "function" then return false end
@@ -190,36 +195,6 @@ local function SetHonorBarUnlocked(flag)
     if ZurkMapsHonorWidget and ZurkMapsHonorWidget.SetGlobalUnlocked then ZurkMapsHonorWidget.SetGlobalUnlocked(flag) end
 end
 
-local function CreateCompactIconBorder(button)
-    -- Exact Zurk Maps crisp icon border: dark brown outer frame + bronze inner frame.
-    local border = CreateFrame("Frame", nil, button)
-    border:SetAllPoints()
-    border:SetFrameLevel(button:GetFrameLevel() + 2)
-    border:EnableMouse(false)
-
-    local function Edge(point1, relativePoint1, x1, y1, point2, relativePoint2, x2, y2, width, height, r, g, b, a)
-        local texture = border:CreateTexture(nil, "OVERLAY")
-        texture:SetPoint(point1, border, relativePoint1, x1, y1)
-        if point2 then texture:SetPoint(point2, border, relativePoint2, x2, y2) end
-        if width then texture:SetWidth(width) end
-        if height then texture:SetHeight(height) end
-        texture:SetColorTexture(r, g, b, a)
-        return texture
-    end
-
-    Edge("TOPLEFT", "TOPLEFT", 0, 0, "TOPRIGHT", "TOPRIGHT", 0, 0, nil, 1, 0.055, 0.035, 0.018, 1.00)
-    Edge("BOTTOMLEFT", "BOTTOMLEFT", 0, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, 0, nil, 1, 0.055, 0.035, 0.018, 1.00)
-    Edge("TOPLEFT", "TOPLEFT", 0, 0, "BOTTOMLEFT", "BOTTOMLEFT", 0, 0, 1, nil, 0.055, 0.035, 0.018, 1.00)
-    Edge("TOPRIGHT", "TOPRIGHT", 0, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, 0, 1, nil, 0.055, 0.035, 0.018, 1.00)
-
-    Edge("TOPLEFT", "TOPLEFT", 1, -1, "TOPRIGHT", "TOPRIGHT", -1, -1, nil, 1, 0.70, 0.52, 0.20, 1.00)
-    Edge("BOTTOMLEFT", "BOTTOMLEFT", 1, 1, "BOTTOMRIGHT", "BOTTOMRIGHT", -1, 1, nil, 1, 0.70, 0.52, 0.20, 1.00)
-    Edge("TOPLEFT", "TOPLEFT", 1, -1, "BOTTOMLEFT", "BOTTOMLEFT", 1, 1, 1, nil, 0.70, 0.52, 0.20, 1.00)
-    Edge("TOPRIGHT", "TOPRIGHT", -1, -1, "BOTTOMRIGHT", "BOTTOMRIGHT", -1, 1, 1, nil, 0.70, 0.52, 0.20, 1.00)
-
-    return border
-end
-
 local avBattlecry
 if ZurkMapsBattlecry and ZurkMapsBattlecry.Create then
     avBattlecry = ZurkMapsBattlecry.Create({
@@ -237,7 +212,7 @@ if ZurkMapsBattlecry and ZurkMapsBattlecry.Create then
         iconAlpha = 1.00,
         borderAlpha = 1.00,
         hoverAlpha = 1.00,
-        createBorder = CreateCompactIconBorder,
+        createBorder = ZurkMapsBattlecry.CreateButtonBorder,
         sendMessage = function(message, chatType)
             if not SendChatCompat(message, chatType or "YELL") then
                 print("|cff33ff99Zurk Maps|r Could not send Battlecry.")
