@@ -13,6 +13,7 @@ local PANE_TEXT_R, PANE_TEXT_G, PANE_TEXT_B = 0.72, 0.66, 0.50
 
 ZurksWSGCalloutMapDB = ZurksWSGCalloutMapDB or {}
 if ZurksWSGCalloutMapDB.showHonorBar == nil then ZurksWSGCalloutMapDB.showHonorBar = true end
+if ZurksWSGCalloutMapDB.autoEFCHealth == nil then ZurksWSGCalloutMapDB.autoEFCHealth = true end
 
 local hoveredZone = nil
 local isMoving = false
@@ -51,7 +52,7 @@ local ZONES = {
     { id="HORDE_TUNNEL", name="Horde Tunnel", message="EFC is at HORDE TUNNEL!", points={ {45.000, 52.800}, {60.000, 52.800}, {61.700, 56.200}, {63.000, 61.800}, {53.400, 63.200}, {53.400, 73.400}, {48.800, 73.400}, {48.800, 63.200}, {43.700, 61.800}, {44.200, 56.200} } },
     -- The red highlight follows the ramp; the blue-reference hover envelope
     -- adds a forgiving margin, especially around the western ramp approach.
-    { id="HORDE_RAMP", name="Horde Ramp", message="EFC is at HORDE RAMP!", drawPolygon=true,
+    { id="HORDE_RAMP", name="Horde Ramp", message="EFC is at HORDE RAMP!",
       points={ {22.000, 63.500}, {28.000, 62.500}, {43.700, 61.800}, {48.800, 63.200}, {48.800, 69.000}, {33.000, 69.500}, {30.000, 67.500}, {26.000, 65.500} },
       hoverPoints={ {19.500, 62.800}, {31.000, 61.900}, {44.300, 61.500}, {46.200, 62.300}, {49.200, 62.600}, {49.400, 68.800}, {47.500, 69.400}, {36.700, 69.500}, {33.000, 70.000}, {30.000, 69.700}, {20.400, 66.900}, {18.500, 65.100}, {18.900, 63.600} } },
     { id="HORDE_GRAVEYARD", name="Horde Graveyard", message="EFC is at HORDE GRAVEYARD!", points={ {53.400, 63.200}, {63.000, 61.800}, {79.000, 63.000}, {79.000, 69.000}, {61.000, 69.000}, {53.400, 69.000} } },
@@ -90,12 +91,9 @@ local frame = CreateFrame("Frame", "ZurksWSGCalloutMapFrame", UIParent)
 -- Start hidden before secure carrier buttons are parented beneath this frame.
 -- Once those secure children exist, showing/hiding the parent is protected in combat.
 frame:Hide()
-frame:SetSize(MAP_WIDTH + 10, MAP_HEIGHT + (ACTION_HEIGHT * 2) + MOVE_HANDLE_HEIGHT)
+frame:SetSize(MAP_WIDTH + 10, MAP_HEIGHT + ACTION_HEIGHT + MOVE_HANDLE_HEIGHT)
 frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 frame:SetClampedToScreen(true)
--- Reserve the report footer even while hidden, so a new callout cannot move
--- the protected map in combat or appear below the bottom of the screen.
-frame:SetClampRectInsets(0, 0, 0, -(ZurkMapsWSGIncoming.RECEIPT_HEIGHT - ZurkMapsWSGIncoming.RECEIPT_OVERLAP))
 frame:SetMovable(true)
 
 local map = CreateFrame("Frame", nil, frame)
@@ -320,88 +318,414 @@ end)
 
 -- Hover and incoming chat reports share exactly the same area artwork and
 -- polygon renderer. Each possible reported area gets its own reusable layer.
+ZurkMapsWSGIncoming.Visual = {
+    stripeTexture = "Interface\\AddOns\\ZurkMaps\\Media\\CalloutStripes",
+    stripeLong = 1024,
+    stripeShort = 512,
+    stripeTile = 16,
+    stripeCycle = 3.2,
+    stripeAlpha = 0.34,
+    borderDashCycle = 1.8,
+    borderAlpha = 0.86,
+    shadowOffset = 2.15,
+    shadowAlpha = 0.48,
+    hoverLiftOffset = 0,
+    pressedOffset = 1.35,
+    releaseDuration = 0.09,
+    allianceNudgePercent = (5 / (MAP_WIDTH + 4)) * 100,
+}
+
+function ZurkMapsWSGIncoming.GetVisualZoneNudgePercent(zone)
+    local id = zone and zone.id or ""
+    if id:match("^ALLY_") and id ~= "ALLY_TOP_OF_TUNNEL" then
+        return ZurkMapsWSGIncoming.Visual.allianceNudgePercent
+    end
+    return 0
+end
+
+function ZurkMapsWSGIncoming.GetVisualZoneColor(zone)
+    local id = zone and zone.id or ""
+    if id:match("^ALLY_") then return 95 / 255, 170 / 255, 1 end
+    if id:match("^HORDE_") then return 1, 105 / 255, 105 / 255 end
+    return 90 / 255, 245 / 255, 135 / 255
+end
+
+function ZurkMapsWSGIncoming.GetVisualZoneFillColor(zone)
+    local id = zone and zone.id or ""
+    if id:match("^ALLY_") then return 40 / 255, 120 / 255, 1 end
+    if id:match("^HORDE_") then return 245 / 255, 65 / 255, 65 / 255 end
+    return 45 / 255, 220 / 255, 100 / 255
+end
+
+function ZurkMapsWSGIncoming.GetVisualZonePoints(zone)
+    local nudgeX = ZurkMapsWSGIncoming.GetVisualZoneNudgePercent(zone)
+    if zone and zone.points then
+        if nudgeX == 0 then return zone.points end
+        local points = {}
+        for _, point in ipairs(zone.points) do
+            points[#points + 1] = {point[1] + nudgeX, point[2]}
+        end
+        return points
+    end
+    if not zone or not zone.cx or not zone.cy or not zone.rx or not zone.ry then return nil end
+    local points = {}
+    for index = 0, 39 do
+        local angle = (math.pi * 2 * index) / 40
+        points[#points + 1] = {
+            zone.cx + nudgeX + (math.cos(angle) * zone.rx),
+            zone.cy + (math.sin(angle) * zone.ry),
+        }
+    end
+    return points
+end
+
 local function CreateWSGHighlight()
     local highlightTexture = CreateFrame("Frame", nil, map)
     highlightTexture:SetAllPoints()
     highlightTexture:SetFrameLevel(map:GetFrameLevel())
     highlightTexture:EnableMouse(false)
+    highlightTexture.shadowTexture = highlightTexture:CreateTexture(nil, "BORDER")
+    highlightTexture.shadowTexture:SetAllPoints()
+    highlightTexture.shadowTexture:SetVertexColor(0, 0, 0, 0.48)
+    highlightTexture.shadowTexture:Hide()
     highlightTexture.texture = highlightTexture:CreateTexture(nil, "ARTWORK")
     highlightTexture.texture:SetAllPoints()
-    highlightTexture.fills = {}
-    highlightTexture.edges = {}
+    highlightTexture.calloutMask = highlightTexture:CreateMaskTexture(nil, "ARTWORK")
+    highlightTexture.calloutMask:SetAllPoints()
+    highlightTexture.calloutFillTexture = highlightTexture:CreateTexture(nil, "ARTWORK", nil, 1)
+    highlightTexture.calloutFillTexture:SetAllPoints()
+    highlightTexture.calloutFillTexture:AddMaskTexture(highlightTexture.calloutMask)
+    highlightTexture.calloutFillTexture:Hide()
+    highlightTexture.calloutStripeTexture = highlightTexture:CreateTexture(nil, "OVERLAY", nil, 1)
+    highlightTexture.calloutStripeTexture:SetAllPoints()
+    highlightTexture.calloutStripeTexture:SetTexture(ZurkMapsWSGIncoming.Visual.stripeTexture)
+    highlightTexture.calloutStripeTexture:SetBlendMode("BLEND")
+    highlightTexture.calloutStripeTexture:AddMaskTexture(highlightTexture.calloutMask)
+    highlightTexture.calloutStripeTexture:Hide()
+    highlightTexture.calloutBorderSegments = {}
 
-    -- Render the edited ramp directly from its polygon so the visual boundary and
-    -- source geometry cannot diverge from a stale, pre-rendered highlight mask.
     function highlightTexture:SetZone(zone)
         self.zone = zone
-        for _, fill in ipairs(self.fills) do fill:Hide() end
-        for _, edge in ipairs(self.edges) do edge:Hide() end
-        if not zone.drawPolygon then
-            self.texture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id)
-            self.texture:Show()
+        self.shadowTexture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id)
+        self.texture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id)
+        self.calloutMask:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\CalloutMasks\\" .. zone.id)
+        self.texture:Show()
+    end
+
+    function highlightTexture:GetCalloutBorderPoint(distance)
+        local points = self.calloutPixelPoints
+        local edgeLengths = self.calloutEdgeLengths
+        local perimeter = self.calloutPerimeter or 0
+        if not points or not edgeLengths or perimeter <= 0 then return 0, 0 end
+        distance = distance % perimeter
+        local traversed = 0
+        for index, point in ipairs(points) do
+            local length = edgeLengths[index]
+            if distance <= traversed + length or index == #points then
+                local nextPoint = points[(index % #points) + 1]
+                local ratio = length > 0 and ((distance - traversed) / length) or 0
+                return point[1] + ((nextPoint[1] - point[1]) * ratio), point[2] + ((nextPoint[2] - point[2]) * ratio)
+            end
+            traversed = traversed + length
+        end
+        return points[1][1], points[1][2]
+    end
+
+    function highlightTexture:BuildCalloutGeometry()
+        self.texture:Hide()
+        self.calloutFillTexture:Hide()
+        self.calloutStripeTexture:Hide()
+        for _, segment in ipairs(self.calloutBorderSegments) do segment:Hide() end
+        self.calloutFillCount, self.calloutStripeCount, self.calloutBorderCount = 0, 0, 0
+        if not self.calloutActive or not self.zone then return end
+
+        local visual = ZurkMapsWSGIncoming.Visual
+        local points = ZurkMapsWSGIncoming.GetVisualZonePoints(self.zone)
+        local width, height = self:GetWidth(), self:GetHeight()
+        if not points or #points < 3 or not width or not height or width <= 0 or height <= 0 then return end
+        local r, g, b = ZurkMapsWSGIncoming.GetVisualZoneColor(self.zone)
+        local fillR, fillG, fillB = ZurkMapsWSGIncoming.GetVisualZoneFillColor(self.zone)
+
+        -- The full-map textures share a supersampled alpha mask. That preserves
+        -- one stripe direction across ambiguous areas while smoothing diagonals
+        -- and curves that the old one-pixel scanline clipping made jagged.
+        self.calloutFillTexture:SetColorTexture(fillR, fillG, fillB, 72 / 255)
+        self.calloutFillTexture:Show()
+        self.calloutStripeTexture:SetVertexColor(r, g, b, visual.stripeAlpha)
+        self.calloutStripeTexture:Show()
+        self.calloutFillCount, self.calloutStripeCount = 1, 1
+
+        -- Split the complete normal border into evenly weighted dashes. The
+        -- entire dash pattern moves as one; there is no bright head or tail.
+        local pixelPoints, perimeter = {}, 0
+        for _, point in ipairs(points) do
+            pixelPoints[#pixelPoints + 1] = {point[1] * width / 100, point[2] * height / 100}
+        end
+        local edgeLengths = {}
+        for index, point in ipairs(pixelPoints) do
+            local nextPoint = pixelPoints[(index % #pixelPoints) + 1]
+            local dx, dy = nextPoint[1] - point[1], nextPoint[2] - point[2]
+            local length = math.sqrt((dx * dx) + (dy * dy))
+            edgeLengths[index] = length
+            perimeter = perimeter + length
+        end
+        if perimeter <= 0 then return end
+
+        self.calloutPixelPoints = pixelPoints
+        self.calloutEdgeLengths = edgeLengths
+        self.calloutPerimeter = perimeter
+        local segmentCount = math.max(16, math.min(40, math.floor((perimeter / 8) + 0.5)))
+        local cellLength = perimeter / segmentCount
+        self.calloutCellLength = cellLength
+        for index = 1, segmentCount do
+            local x1, y1 = self:GetCalloutBorderPoint((index - 1) * cellLength)
+            local x2, y2 = self:GetCalloutBorderPoint(((index - 1) * cellLength) + (cellLength * 0.68))
+            local segment = self.calloutBorderSegments[index]
+            if not segment then
+                segment = self:CreateLine(nil, "OVERLAY")
+                self.calloutBorderSegments[index] = segment
+            end
+            segment:SetColorTexture(r, g, b, 1)
+            segment:SetThickness(2.35)
+            segment:SetStartPoint("TOPLEFT", self, x1, -y1)
+            segment:SetEndPoint("TOPLEFT", self, x2, -y2)
+            segment:SetAlpha(visual.borderAlpha * (self.calloutPulseAlpha or 1))
+            segment:Show()
+        end
+        self.calloutBorderCount = segmentCount
+        self:UpdateCalloutAnimation(self.calloutAge or 0)
+    end
+
+    function highlightTexture:ApplyShadow()
+        if not self.shadowMode then
+            self.shadowTexture:Hide()
             return
         end
-        self.texture:Hide()
-        local width, height = self:GetWidth(), self:GetHeight()
-        if not width or not height or width <= 0 or height <= 0 then return end
-        local points, minY, maxY = zone.points, 100, 0
-        for _, point in ipairs(points) do
-            minY, maxY = math.min(minY, point[2]), math.max(maxY, point[2])
-        end
-        local rowHeight, used = 0.5, 0
-        local firstY, lastY = minY * height / 100, maxY * height / 100
-        for rowY = firstY, lastY - 0.001, rowHeight do
-            local h = math.min(rowHeight, lastY - rowY)
-            local sampleY = (rowY + h / 2) * 100 / height
-            local crossings = {}
-            local previous = points[#points]
-            for _, point in ipairs(points) do
-                if (point[2] > sampleY) ~= (previous[2] > sampleY) then
-                    crossings[#crossings + 1] = point[1] + ((sampleY - point[2]) * (previous[1] - point[1]) / (previous[2] - point[2]))
-                end
-                previous = point
+        -- Keep the shadow anchored to the map while the colored area itself
+        -- moves above it or presses toward it.
+        local offset = (tonumber(self.shadowMapOffset) or 0) - (tonumber(self.contentOffset) or 0)
+        self.shadowTexture:ClearAllPoints()
+        self.shadowTexture:SetPoint("TOPLEFT", self, "TOPLEFT", offset, -offset)
+        self.shadowTexture:SetSize(self:GetWidth(), self:GetHeight())
+        self.shadowTexture:SetVertexColor(0, 0, 0, tonumber(self.shadowAlpha) or 0)
+        self.shadowTexture:Show()
+    end
+
+    function highlightTexture:ApplyContentOffset()
+        local offset = tonumber(self.contentOffset) or 0
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", map, "TOPLEFT", offset, -offset)
+        self:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", offset, -offset)
+    end
+
+    function highlightTexture:GetInteractionShadowAlpha()
+        local visual = ZurkMapsWSGIncoming.Visual
+        local alpha = self.interactionPressed and 0.20 or visual.shadowAlpha
+        if self.calloutActive then alpha = alpha * (self.calloutExpiryAlpha or 1) end
+        return alpha
+    end
+
+    function highlightTexture:BeginInteractionRelease()
+        local visual = ZurkMapsWSGIncoming.Visual
+        self.interactionPressed = false
+        self.contentTargetOffset = visual.hoverLiftOffset
+        self.releaseStartOffset = math.max(0, tonumber(self.contentOffset) or 0)
+        self.releaseElapsed = 0
+        self.releaseActive = self.releaseStartOffset > 0.001
+    end
+
+    function highlightTexture:SetHoverInteraction(active)
+        if active then
+            local visual = ZurkMapsWSGIncoming.Visual
+            self.pendingHoverExit = false
+            self.interactionActive = true
+            self.shadowMode = self.calloutActive and "CALLOUT" or "HOVER"
+            self.shadowMapOffset = visual.shadowOffset
+            self.contentOffset = self.contentOffset or 0
+            self.contentTargetOffset = visual.hoverLiftOffset
+            self.shadowAlpha = self:GetInteractionShadowAlpha()
+            self.shadowTargetAlpha = self.shadowAlpha
+            self:ApplyShadow()
+        else
+            local visual = ZurkMapsWSGIncoming.Visual
+            local wasPressed = self.interactionPressed
+            self.interactionActive = false
+            if wasPressed then self:BeginInteractionRelease() end
+            self.contentTargetOffset = visual.hoverLiftOffset
+            if self.calloutActive then
+                self.shadowMode = "CALLOUT"
+                self.shadowMapOffset = visual.shadowOffset
+                self.shadowAlpha = self:GetInteractionShadowAlpha()
+                self.shadowTargetAlpha = self.shadowAlpha
+                self:ApplyShadow()
+            elseif self.releaseActive or math.abs(tonumber(self.contentOffset) or 0) > 0.02 then
+                if not self.releaseActive then self:BeginInteractionRelease() end
+                -- Let a released button finish returning even if the pointer has
+                -- already left. Its shadow remains anchored until that same frame
+                -- reaches rest, then both disappear together.
+                self.pendingHoverExit = true
+                self.shadowMode = "HOVER_RELEASE"
+                self.shadowMapOffset = visual.shadowOffset
+                self.shadowAlpha = visual.shadowAlpha
+                self.shadowTargetAlpha = visual.shadowAlpha
+                self:ApplyShadow()
+            else
+                self.pendingHoverExit = false
+                self.shadowMode = nil
+                self.contentOffset, self.contentTargetOffset = 0, 0
+                self.shadowAlpha, self.shadowTargetAlpha = nil, nil
+                self:ApplyContentOffset()
+                self.shadowTexture:Hide()
             end
-            table.sort(crossings)
-            for index = 1, #crossings - 1, 2 do
-                used = used + 1
-                local fill = self.fills[used]
-                if not fill then
-                    fill = self:CreateTexture(nil, "ARTWORK")
-                    fill:SetColorTexture(245 / 255, 65 / 255, 65 / 255, 72 / 255)
-                    if fill.SetSnapToPixelGrid then fill:SetSnapToPixelGrid(false) end
-                    if fill.SetTexelSnappingBias then fill:SetTexelSnappingBias(0) end
-                    self.fills[used] = fill
-                end
-                fill:ClearAllPoints()
-                fill:SetPoint("TOPLEFT", self, "TOPLEFT", crossings[index] * width / 100, -rowY)
-                fill:SetSize((crossings[index + 1] - crossings[index]) * width / 100, h)
-                fill:Show()
-            end
-        end
-        for index, point in ipairs(points) do
-            local nextPoint = points[(index % #points) + 1]
-            local edge = self.edges[index]
-            if not edge then
-                edge = self:CreateLine(nil, "OVERLAY")
-                edge:SetColorTexture(1, 105 / 255, 105 / 255, 235 / 255)
-                self.edges[index] = edge
-            end
-            -- Other region masks have a four-pixel outline on a 512x512 source,
-            -- stretched to this portrait map. Match that weight in each direction
-            -- instead of using a thinner, fixed-width runtime line.
-            local dx, dy = nextPoint[1] - point[1], nextPoint[2] - point[2]
-            local sourceLength = math.sqrt(dx * dx + dy * dy)
-            local displayLength = math.sqrt((dx * width) ^ 2 + (dy * height) ^ 2)
-            if displayLength > 0 then
-                edge:SetThickness(4 * width * height * sourceLength / (512 * displayLength))
-            end
-            edge:SetStartPoint("TOPLEFT", self, point[1] * width / 100, -point[2] * height / 100)
-            edge:SetEndPoint("TOPLEFT", self, nextPoint[1] * width / 100, -nextPoint[2] * height / 100)
-            edge:Show()
         end
     end
+
+    function highlightTexture:SetInteractionPressed(pressed)
+        if not self.interactionActive then return end
+        local visual = ZurkMapsWSGIncoming.Visual
+        if pressed then
+            -- Apply the down state on the input event itself. A complete click can
+            -- occur between two OnUpdate frames, so easing toward this state could
+            -- otherwise skip the press entirely.
+            self.interactionPressed = true
+            self.releaseActive = false
+            self.contentOffset = visual.pressedOffset
+            self.contentTargetOffset = visual.pressedOffset
+        else
+            self:BeginInteractionRelease()
+        end
+        self.shadowAlpha = self:GetInteractionShadowAlpha()
+        self.shadowTargetAlpha = self.shadowAlpha
+        self:ApplyContentOffset()
+        self:ApplyShadow()
+    end
+
+    function highlightTexture:UpdateInteractionAnimation(elapsed)
+        if not self.shadowMode then return end
+        elapsed = math.max(0, tonumber(elapsed) or 0)
+        if self.interactionPressed then
+            self.contentOffset = ZurkMapsWSGIncoming.Visual.pressedOffset
+        elseif self.releaseActive then
+            self.releaseElapsed = (self.releaseElapsed or 0) + elapsed
+            local duration = math.max(0.001, ZurkMapsWSGIncoming.Visual.releaseDuration)
+            local progress = math.min(1, self.releaseElapsed / duration)
+            self.contentOffset = (self.releaseStartOffset or 0) * ((1 - progress) ^ 3)
+            if progress >= 1 then
+                self.contentOffset = ZurkMapsWSGIncoming.Visual.hoverLiftOffset
+                self.releaseActive = false
+                self.releaseElapsed = nil
+                self.releaseStartOffset = nil
+            end
+        else
+            self.contentOffset = self.contentTargetOffset or ZurkMapsWSGIncoming.Visual.hoverLiftOffset
+        end
+        self.shadowAlpha = self:GetInteractionShadowAlpha()
+        self.shadowTargetAlpha = self.shadowAlpha
+        if self.pendingHoverExit and not self.releaseActive then
+            self.contentOffset, self.contentTargetOffset = 0, 0
+            self.pendingHoverExit = false
+            self.shadowMode = nil
+            self.shadowAlpha, self.shadowTargetAlpha = nil, nil
+            self:ApplyContentOffset()
+            self.shadowTexture:Hide()
+            self:Hide()
+            return
+        end
+        self:ApplyContentOffset()
+        self:ApplyShadow()
+    end
+
+    function highlightTexture:IsFinishingHoverRelease()
+        return self.pendingHoverExit and true or false
+    end
+
+    function highlightTexture:SetCalloutActive(active)
+        self.calloutActive = active and true or false
+        if self.calloutActive then
+            local visual = ZurkMapsWSGIncoming.Visual
+            self.shadowMode = "CALLOUT"
+            self.shadowMapOffset = visual.shadowOffset
+            self.shadowAlpha = visual.shadowAlpha
+            self.shadowTargetAlpha = visual.shadowAlpha
+            self.calloutExpiryAlpha = 1
+            self.pendingHoverExit = false
+            self.contentOffset = self.contentOffset or 0
+            self.contentTargetOffset = self.interactionActive and visual.hoverLiftOffset or 0
+            self:ApplyContentOffset()
+            self:ApplyShadow()
+            self:BuildCalloutGeometry()
+            self:SetCalloutPulseAlpha(1)
+        else
+            self.shadowMode = nil
+            self.pendingHoverExit = false
+            self.interactionActive = false
+            self.interactionPressed = false
+            self.releaseActive = false
+            self.releaseElapsed, self.releaseStartOffset = nil, nil
+            self.contentOffset, self.contentTargetOffset = 0, 0
+            self:ApplyContentOffset()
+            self.shadowTexture:Hide()
+            self.shadowAlpha, self.shadowTargetAlpha = nil, nil
+            self.calloutFillTexture:Hide()
+            self.calloutStripeTexture:Hide()
+            for _, segment in ipairs(self.calloutBorderSegments) do segment:Hide() end
+            self.calloutPulseAlpha = 1
+            self.calloutExpiryAlpha = nil
+            self:SetAlpha(1)
+            if self.zone then self:SetZone(self.zone) end
+        end
+    end
+
+    -- Pulse only the colored callout artwork. The shadow ignores pulse troughs,
+    -- but follows the terminal expiry fade so it cannot outlive the area.
+    function highlightTexture:SetCalloutPulseAlpha(alpha, expiryAlpha)
+        alpha = math.max(0, math.min(1, tonumber(alpha) or 1))
+        expiryAlpha = math.max(0, math.min(1, tonumber(expiryAlpha) or 1))
+        self.calloutPulseAlpha = alpha
+        self.calloutExpiryAlpha = expiryAlpha
+        self:SetAlpha(1)
+        self.calloutFillTexture:SetAlpha(alpha)
+        self.calloutStripeTexture:SetAlpha(alpha)
+        local visual = ZurkMapsWSGIncoming.Visual
+        for index = 1, (self.calloutBorderCount or 0) do
+            self.calloutBorderSegments[index]:SetAlpha(visual.borderAlpha * alpha)
+        end
+        if self.calloutActive then
+            self.shadowAlpha = self:GetInteractionShadowAlpha()
+            self.shadowTargetAlpha = self.shadowAlpha
+            self:ApplyShadow()
+        end
+    end
+
+    function highlightTexture:UpdateCalloutAnimation(age)
+        if not self.calloutActive then return end
+        age = tonumber(age) or 0
+        self.calloutAge = age
+        local visual = ZurkMapsWSGIncoming.Visual
+        local stripePhase = ((age % visual.stripeCycle) / visual.stripeCycle) * visual.stripeTile
+        self.calloutStripeTexture:SetTexCoord(
+            stripePhase / visual.stripeLong,
+            (stripePhase + self:GetWidth()) / visual.stripeLong,
+            0,
+            self:GetHeight() / visual.stripeShort
+        )
+
+        local borderOffset = ((age % visual.borderDashCycle) / visual.borderDashCycle) * (self.calloutCellLength or 0)
+        local count = self.calloutBorderCount or 0
+        for index = 1, count do
+            local startDistance = ((index - 1) * (self.calloutCellLength or 0)) + borderOffset
+            local x1, y1 = self:GetCalloutBorderPoint(startDistance)
+            local x2, y2 = self:GetCalloutBorderPoint(startDistance + ((self.calloutCellLength or 0) * 0.68))
+            local segment = self.calloutBorderSegments[index]
+            segment:SetStartPoint("TOPLEFT", self, x1, -y1)
+            segment:SetEndPoint("TOPLEFT", self, x2, -y2)
+            segment:SetAlpha(visual.borderAlpha * (self.calloutPulseAlpha or 1))
+        end
+    end
+
     highlightTexture:SetScript("OnSizeChanged", function(self)
-        if self.zone and self.zone.drawPolygon then self:SetZone(self.zone) end
+        if self.shadowMode then self:ApplyShadow() end
+        if self.calloutActive then self:BuildCalloutGeometry() end
     end)
     highlightTexture:Hide()
     return highlightTexture
@@ -474,7 +798,7 @@ if frame.actionRow.SetBackdrop then
     frame.actionRow:SetBackdropBorderColor(BOX_BORDER_R, BOX_BORDER_G, BOX_BORDER_B, 0.98)
 end
 
-frame.incomingCallouts = ZurkMapsWSGIncoming.Create(map, ZONES, NESTED_ZONES, CreateWSGHighlight, frame.actionRow)
+frame.incomingCallouts = ZurkMapsWSGIncoming.Create(map, ZONES, NESTED_ZONES, CreateWSGHighlight)
 
 local allianceFlagCarrier = nil
 local hordeFlagCarrier = nil
@@ -500,6 +824,82 @@ local efcAutoHealthState = {
     armed = {},
 }
 
+ZurkMapsWSGEFCHealth = ZurkMapsWSGEFCHealth or {}
+ZurkMapsWSGEFCHealth.PREFIX = "ZMapEFC1"
+ZurkMapsWSGEFCHealth.CLAIM_SETTLE_SECONDS = 0.18
+ZurkMapsWSGEFCHealth.CLAIM_BACKUP_SECONDS = 1.25
+ZurkMapsWSGEFCHealth.pending = nil
+ZurkMapsWSGEFCHealth.recentClaim = nil
+
+function ZurkMapsWSGEFCHealth.IsEnabled()
+    return ZurksWSGCalloutMapDB.autoEFCHealth ~= false
+end
+
+function ZurkMapsWSGEFCHealth.GetCarrierKey(carrierName)
+    if type(carrierName) ~= "string" then return "" end
+    return string.lower(carrierName:match("^[^-]+") or carrierName)
+end
+
+function ZurkMapsWSGEFCHealth.GetPriority(carrierKey, threshold)
+    local identity = (UnitGUID and UnitGUID("player")) or (UnitName and UnitName("player")) or "player"
+    local text = tostring(identity) .. ":" .. tostring(carrierKey or "") .. ":" .. tostring(threshold or "")
+    local hash = 5381
+    for index = 1, string.len(text) do
+        hash = ((hash * 33) + string.byte(text, index)) % 997
+    end
+    return hash
+end
+
+function ZurkMapsWSGEFCHealth.GetStaggerSeconds(threshold, priority)
+    local spread = threshold <= 10 and 0.25 or (threshold <= 20 and 0.40 or 0.65)
+    return 0.08 + ((tonumber(priority) or 0) / 996) * spread
+end
+
+function ZurkMapsWSGEFCHealth.AddonSendSucceeded(ok, firstResult, secondResult)
+    if not ok then return false end
+    local result = secondResult ~= nil and secondResult or firstResult
+    if result == nil or result == true then return true end
+    if result == false then return false end
+    if type(result) == "number" then return result == 0 end
+    return true
+end
+
+function ZurkMapsWSGEFCHealth.Broadcast(message)
+    if not message or message == "" then return false end
+    local inInstance, instanceType = false, nil
+    if IsInInstance then inInstance, instanceType = IsInInstance() end
+    if not inInstance or instanceType ~= "pvp" then return false end
+    if C_ChatInfo and type(C_ChatInfo.SendAddonMessage) == "function" then
+        local ok, firstResult, secondResult = pcall(
+            C_ChatInfo.SendAddonMessage,
+            ZurkMapsWSGEFCHealth.PREFIX,
+            message,
+            "INSTANCE_CHAT"
+        )
+        return ZurkMapsWSGEFCHealth.AddonSendSucceeded(ok, firstResult, secondResult)
+    end
+    if type(_G.SendAddonMessage) == "function" then
+        local ok, firstResult, secondResult = pcall(
+            _G.SendAddonMessage,
+            ZurkMapsWSGEFCHealth.PREFIX,
+            message,
+            "INSTANCE_CHAT"
+        )
+        return ZurkMapsWSGEFCHealth.AddonSendSucceeded(ok, firstResult, secondResult)
+    end
+    return false
+end
+
+function ZurkMapsWSGEFCHealth.RegisterPrefix()
+    if C_ChatInfo and type(C_ChatInfo.RegisterAddonMessagePrefix) == "function" then
+        pcall(C_ChatInfo.RegisterAddonMessagePrefix, ZurkMapsWSGEFCHealth.PREFIX)
+    elseif type(RegisterAddonMessagePrefix) == "function" then
+        pcall(RegisterAddonMessagePrefix, ZurkMapsWSGEFCHealth.PREFIX)
+    end
+end
+
+ZurkMapsWSGEFCHealth.RegisterPrefix()
+
 local function GetEFCHealthBandThreshold(pct)
     if not pct then return nil end
     if pct <= 10 then return 10 end
@@ -509,6 +909,8 @@ local function GetEFCHealthBandThreshold(pct)
 end
 
 local function ResetEFCAutoHealthState(carrierName)
+    ZurkMapsWSGEFCHealth.pending = nil
+    ZurkMapsWSGEFCHealth.recentClaim = nil
     efcAutoHealthState.carrierName = carrierName
     efcAutoHealthState.previousPct = nil
     efcAutoHealthState.pendingRefresh = false
@@ -536,17 +938,137 @@ end
 
 local function SendEFCHealthCallout(pct, threshold)
     if not pct then return end
+    ZurkMapsWSGEFCHealth.pending = nil
     Report(">>> EFC " .. pct .. "%! <<<")
     RecordEFCHealthCallout(pct, threshold)
+end
+
+function ZurkMapsWSGEFCHealth.Queue(carrierName, pct, threshold)
+    if not ZurkMapsWSGEFCHealth.IsEnabled() or not carrierName or not pct or not threshold then return false end
+    local now = GetTime and GetTime() or 0
+    local carrierKey = ZurkMapsWSGEFCHealth.GetCarrierKey(carrierName)
+    local priority = ZurkMapsWSGEFCHealth.GetPriority(carrierKey, threshold)
+    local pending = ZurkMapsWSGEFCHealth.pending
+    if pending and pending.carrierKey == carrierKey and pending.threshold <= threshold then
+        pending.pct = pct
+        return false
+    end
+
+    local dueAt = now + ZurkMapsWSGEFCHealth.GetStaggerSeconds(threshold, priority)
+    local recent = ZurkMapsWSGEFCHealth.recentClaim
+    if recent and recent.carrierKey == carrierKey and recent.threshold <= threshold
+        and now - recent.at < ZurkMapsWSGEFCHealth.CLAIM_BACKUP_SECONDS then
+        dueAt = math.max(dueAt, recent.at + ZurkMapsWSGEFCHealth.CLAIM_BACKUP_SECONDS)
+    end
+    ZurkMapsWSGEFCHealth.pending = {
+        carrierKey = carrierKey,
+        threshold = threshold,
+        pct = pct,
+        priority = priority,
+        dueAt = dueAt,
+        claimSent = false,
+        reportAt = nil,
+    }
+    return true
+end
+
+function ZurkMapsWSGEFCHealth.PostponeForClaim(pending, now)
+    pending.claimSent = false
+    pending.reportAt = nil
+    pending.dueAt = now + ZurkMapsWSGEFCHealth.CLAIM_BACKUP_SECONDS
+        + (ZurkMapsWSGEFCHealth.GetStaggerSeconds(pending.threshold, pending.priority) * 0.25)
+end
+
+function ZurkMapsWSGEFCHealth.HandleClaim(message, sender)
+    if type(message) ~= "string" then return false end
+    local thresholdText, pctText, priorityText, carrierKey = message:match("^H1|(%d+)|(%d+)|(%d+)|([^|]+)$")
+    local threshold, pct, priority = tonumber(thresholdText), tonumber(pctText), tonumber(priorityText)
+    if not threshold or not pct or not priority or not carrierKey then return false end
+    if threshold ~= 40 and threshold ~= 20 and threshold ~= 10 then return false end
+
+    local now = GetTime and GetTime() or 0
+    ZurkMapsWSGEFCHealth.recentClaim = {
+        carrierKey = carrierKey,
+        threshold = threshold,
+        pct = pct,
+        priority = priority,
+        sender = sender,
+        at = now,
+    }
+    local pending = ZurkMapsWSGEFCHealth.pending
+    if not pending or pending.carrierKey ~= carrierKey or threshold > pending.threshold then return true end
+
+    if not pending.claimSent then
+        ZurkMapsWSGEFCHealth.PostponeForClaim(pending, now)
+        return true
+    end
+
+    local localName = (UnitName and UnitName("player")) or ""
+    local remoteWins = priority < pending.priority
+        or (priority == pending.priority and tostring(sender or "") < tostring(localName))
+    if remoteWins then ZurkMapsWSGEFCHealth.PostponeForClaim(pending, now) end
+    return true
+end
+
+function ZurkMapsWSGEFCHealth.HandlePublicReport(message)
+    if type(message) ~= "string" then return false end
+    local pct = tonumber(message:match("^>>>%s*EFC%s+(%d+)%%!%s*<<<$"))
+    local threshold = GetEFCHealthBandThreshold(pct)
+    if not pct or not threshold then return false end
+
+    local pending = ZurkMapsWSGEFCHealth.pending
+    if not pending or threshold <= pending.threshold then ZurkMapsWSGEFCHealth.pending = nil end
+    efcAutoHealthState.pendingRefresh = false
+    RecordEFCHealthCallout(pct, threshold)
+    return true
+end
+
+function ZurkMapsWSGEFCHealth.ProcessPending()
+    local pending = ZurkMapsWSGEFCHealth.pending
+    if not pending then return false end
+    if not ZurkMapsWSGEFCHealth.IsEnabled() then
+        ZurkMapsWSGEFCHealth.pending = nil
+        return false
+    end
+    local now = GetTime and GetTime() or 0
+    if pending.reportAt then
+        if now < pending.reportAt then return false end
+        local pct, threshold = pending.pct, pending.threshold
+        ZurkMapsWSGEFCHealth.pending = nil
+        SendEFCHealthCallout(pct, threshold)
+        return true
+    end
+    if now < pending.dueAt then return false end
+
+    local payload = table.concat({"H1", pending.threshold, pending.pct, pending.priority, pending.carrierKey}, "|")
+    pending.claimSent = true
+    if ZurkMapsWSGEFCHealth.Broadcast(payload) then
+        pending.reportAt = now + ZurkMapsWSGEFCHealth.CLAIM_SETTLE_SECONDS
+        return false
+    end
+    local pct, threshold = pending.pct, pending.threshold
+    ZurkMapsWSGEFCHealth.pending = nil
+    SendEFCHealthCallout(pct, threshold)
+    return true
 end
 
 local function UpdateEFCAutoHealthCallouts(carrierName, pct)
     -- Only call this with a live, currently resolved EFC unit. Cached health is
     -- intentionally display/manual-report data only and can be stale.
     if not carrierName or not pct or pct <= 0 then return end
+    if not ZurkMapsWSGEFCHealth.IsEnabled() then
+        ZurkMapsWSGEFCHealth.pending = nil
+        return
+    end
 
     if efcAutoHealthState.carrierName ~= carrierName then
         ResetEFCAutoHealthState(carrierName)
+    end
+
+    local pending = ZurkMapsWSGEFCHealth.pending
+    if pending and pending.carrierKey == ZurkMapsWSGEFCHealth.GetCarrierKey(carrierName) then
+        pending.pct = pct
+        if pct > pending.threshold then ZurkMapsWSGEFCHealth.pending = nil end
     end
 
     local previousPct = efcAutoHealthState.previousPct
@@ -583,7 +1105,7 @@ local function UpdateEFCAutoHealthCallouts(carrierName, pct)
         local cooldownReady = now - efcLastHealthCalloutTime >= EFC_AUTO_REFRESH_COOLDOWN
 
         if isMoreUrgent or cooldownReady then
-            SendEFCHealthCallout(pct, crossedThreshold)
+            ZurkMapsWSGEFCHealth.Queue(carrierName, pct, crossedThreshold)
             efcAutoHealthState.pendingRefresh = false
         else
             efcAutoHealthState.pendingRefresh = true
@@ -591,7 +1113,7 @@ local function UpdateEFCAutoHealthCallouts(carrierName, pct)
     elseif efcAutoHealthState.pendingRefresh and pct <= 40 then
         local now = GetTime and GetTime() or 0
         if now - efcLastHealthCalloutTime >= EFC_AUTO_REFRESH_COOLDOWN then
-            SendEFCHealthCallout(pct, GetEFCHealthBandThreshold(pct))
+            ZurkMapsWSGEFCHealth.Queue(carrierName, pct, GetEFCHealthBandThreshold(pct))
             efcAutoHealthState.pendingRefresh = false
         end
     elseif pct > 40 then
@@ -600,6 +1122,9 @@ local function UpdateEFCAutoHealthCallouts(carrierName, pct)
 
     efcAutoHealthState.previousPct = pct
 end
+
+ZurkMapsWSGEFCHealth.Update = UpdateEFCAutoHealthCallouts
+ZurkMapsWSGEFCHealth.Reset = ResetEFCAutoHealthState
 
 local function GetCarrierAssignments()
     local faction = UnitFactionGroup("player")
@@ -1281,6 +1806,7 @@ end
 local carrierFrameUpdateElapsed = 0
 local carrierFrameUpdater = CreateFrame("Frame", nil, frame)
 carrierFrameUpdater:SetScript("OnUpdate", function(self, elapsed)
+    ZurkMapsWSGEFCHealth.ProcessPending()
     carrierFrameUpdateElapsed = carrierFrameUpdateElapsed + elapsed
     if carrierFrameUpdateElapsed < 0.15 then
         return
@@ -2775,7 +3301,8 @@ local function FindZone(x, y)
 
     -- Nested Top of Tunnel areas retain first priority.
     for _, zone in ipairs(NESTED_ZONES) do
-        if PointInEllipse(x, y, zone) then
+        local testX = x - ZurkMapsWSGIncoming.GetVisualZoneNudgePercent(zone)
+        if PointInEllipse(testX, y, zone) then
             return zone
         end
     end
@@ -2783,13 +3310,15 @@ local function FindZone(x, y)
     -- Explicit hover envelopes take priority over neighboring region edges.
     -- They affect only pointer interaction, not the visible highlight polygon.
     for _, zone in ipairs(ZONES) do
-        if zone.hoverPoints and PointInPolygon(x, y, zone.hoverPoints) then
+        local testX = x - ZurkMapsWSGIncoming.GetVisualZoneNudgePercent(zone)
+        if zone.hoverPoints and PointInPolygon(testX, y, zone.hoverPoints) then
             return zone
         end
     end
 
     for _, zone in ipairs(ZONES) do
-        if PointInPolygon(x, y, zone.points) then
+        local testX = x - ZurkMapsWSGIncoming.GetVisualZoneNudgePercent(zone)
+        if PointInPolygon(testX, y, zone.points) then
             return zone
         end
     end
@@ -2798,21 +3327,38 @@ local function FindZone(x, y)
 end
 
 local function ShowZone(zone)
-    if hoveredZone == zone then
+    local incoming = frame.incomingCallouts
+    local useCalloutLayer = zone and incoming and incoming.IsAreaActive and incoming:IsAreaActive(zone.id) or false
+    if hoveredZone == zone and highlightTexture.hoverUsesCallout == useCalloutLayer then
         return
     end
 
+    if highlightTexture.hoverUsesCallout and incoming and incoming.SetAreaInteraction then
+        incoming:SetAreaInteraction(nil, false, false)
+    else
+        highlightTexture:SetHoverInteraction(false)
+    end
     hoveredZone = zone
+    highlightTexture.hoverUsesCallout = useCalloutLayer
     GameTooltip:Hide()
 
     if not zone then
-        highlightTexture:Hide()
+        if not highlightTexture:IsFinishingHoverRelease() then
+            highlightTexture:Hide()
+        end
         return
     end
 
-    -- Highlight only while the pointer is inside the hotspot.
-    highlightTexture:SetZone(zone)
-    highlightTexture:Show()
+    -- Interact with the active striped callout itself. Ordinary areas continue
+    -- to use the familiar hover artwork and the same press/lift motion.
+    if useCalloutLayer then
+        highlightTexture:Hide()
+        incoming:SetAreaInteraction(zone.id, true, false)
+    else
+        highlightTexture:SetZone(zone)
+        highlightTexture:SetHoverInteraction(true)
+        highlightTexture:Show()
+    end
 
     -- Use Blizzard's normal tooltip placement (bottom-right by default)
     -- and show only the full, unabbreviated location name.
@@ -3030,6 +3576,7 @@ friendlyFlagMarker:SetScript("OnLeave", function()
 end)
 
 map:SetScript("OnUpdate", function(self, elapsed)
+    highlightTexture:UpdateInteractionAnimation(elapsed)
     if ZurkMapsOptions and ZurkMapsOptions.menu and ZurkMapsOptions.menu:IsShown() then
         return
     end
@@ -3083,7 +3630,24 @@ map:SetScript("OnLeave", function()
     end
 end)
 
+map:SetScript("OnMouseDown", function(_, button)
+    if button == "LeftButton" and hoveredZone and not isMoving and not resizing then
+        if highlightTexture.hoverUsesCallout and frame.incomingCallouts then
+            frame.incomingCallouts:SetAreaInteraction(hoveredZone.id, true, true)
+        else
+            highlightTexture:SetInteractionPressed(true)
+        end
+    end
+end)
+
 map:SetScript("OnMouseUp", function(self, button)
+    if button == "LeftButton" then
+        if highlightTexture.hoverUsesCallout and hoveredZone and frame.incomingCallouts then
+            frame.incomingCallouts:SetAreaInteraction(hoveredZone.id, true, false)
+        else
+            highlightTexture:SetInteractionPressed(false)
+        end
+    end
     if button == "RightButton" and not isMoving and not resizing then
         if ZurkMapsPlayerIcons then
             local testPlayers = ZurkMapsWSGTestSim.GetPlayersUnderMouse()
@@ -3603,6 +4167,11 @@ if ZurkMapsOptions then
         closeCommand = "hide",
         runCommand = function(command) SlashCmdList["WSGCALLOUTS"](command or "") end,
         isTestModeActive = function() return wsgTestMode end,
+        getAutoEFCHealthEnabled = function() return ZurkMapsWSGEFCHealth.IsEnabled() end,
+        setAutoEFCHealthEnabled = function(value)
+            ZurksWSGCalloutMapDB.autoEFCHealth = value and true or false
+            ResetEFCAutoHealthState(efcAutoHealthState.carrierName)
+        end,
         isHonorBarVisible = function() return frame.IsWSGHonorBarVisible() end,
         setHonorBarVisible = function(value) frame.SetWSGHonorBarVisible(value) end,
         getHonorBarMode = function() return frame.GetWSGHonorBarMode() end,
@@ -3627,6 +4196,10 @@ frame:RegisterEvent("ZONE_CHANGED_INDOORS")
 frame:RegisterEvent("CHAT_MSG_BG_SYSTEM_ALLIANCE")
 frame:RegisterEvent("CHAT_MSG_BG_SYSTEM_HORDE")
 frame:RegisterEvent("CHAT_MSG_BG_SYSTEM_NEUTRAL")
+frame:RegisterEvent("CHAT_MSG_ADDON")
+frame:RegisterEvent("CHAT_MSG_INSTANCE_CHAT")
+frame:RegisterEvent("CHAT_MSG_INSTANCE_CHAT_LEADER")
+frame:RegisterEvent("CHAT_MSG_RAID_WARNING")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
@@ -3641,6 +4214,21 @@ frame:SetScript("OnEvent", function(self, event, ...)
             UpdateTargetButtons()
             UpdateVisibility()
         end
+        return
+    end
+
+    if event == "CHAT_MSG_ADDON" then
+        local prefix, message, channel, sender = ...
+        if IsInWarsongGulch() and prefix == ZurkMapsWSGEFCHealth.PREFIX and channel == "INSTANCE_CHAT" then
+            ZurkMapsWSGEFCHealth.HandleClaim(message, sender)
+        end
+        return
+    end
+
+    if event == "CHAT_MSG_INSTANCE_CHAT"
+        or event == "CHAT_MSG_INSTANCE_CHAT_LEADER"
+        or event == "CHAT_MSG_RAID_WARNING" then
+        if IsInWarsongGulch() then ZurkMapsWSGEFCHealth.HandlePublicReport((...)) end
         return
     end
 

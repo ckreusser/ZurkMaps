@@ -283,6 +283,12 @@ local function EnsureState(info)
     return state
 end
 
+-- Rehearsal health/deaths are display-only; live observations and sync continue
+-- to use EnsureState and are restored as soon as the test is stopped.
+local function GetDisplayState(info)
+    return LT.testMode and LT.testStates and LT.testStates[info.id] or EnsureState(info)
+end
+
 local function AddonSendSucceeded(ok, firstResult, secondResult)
     if not ok then return false end
     local result = secondResult ~= nil and secondResult or firstResult
@@ -674,7 +680,7 @@ local function ShowPath(info)
         HidePath(info)
         return
     end
-    local state = EnsureState(info)
+    local state = GetDisplayState(info)
     local inv = GetDisplayCompensation()
     local r, g, b = GetFactionColor(info)
     if state.dead then r, g, b = 0.82, 0.82, 0.82 end
@@ -706,7 +712,7 @@ end
 
 local function ShowLieutenantTooltip(owner, info, fromPath)
     if not owner or not info then return end
-    local state = EnsureState(info)
+    local state = GetDisplayState(info)
     local r,g,b = GetFactionColor(info)
     GameTooltip:SetOwner(owner, "ANCHOR_NONE")
     GameTooltip:ClearAllPoints()
@@ -796,13 +802,13 @@ local function UpdateNPCHealthBar(info)
     if not info or not info.blip then return end
     local bar = EnsureNPCHealthBar(info)
     if not bar then return end
-    local state = EnsureState(info)
+    local state = GetDisplayState(info)
     local pct = tonumber(state.healthPct) or 100
     local updatedAt = tonumber(state.healthUpdatedAt)
     local now = GetTime and GetTime() or 0
     local fresh = updatedAt and updatedAt > 0 and (now - updatedAt) <= HEALTH_STALE_SECONDS
 
-    if state.dead or pct <= 0 or pct >= 99.95 or not fresh or not IsEnemyHonorNPC(info) then
+    if state.dead or pct <= 0 or pct >= 99.95 or not fresh or (not LT.testMode and not IsEnemyHonorNPC(info)) then
         bar:Hide()
         return
     end
@@ -830,12 +836,12 @@ end
 
 local function IsNPCInObservedCombat(info)
     if not info then return false end
-    local state = EnsureState(info)
+    local state = GetDisplayState(info)
     if state.dead then return false end
     local pct = tonumber(state.healthPct) or 100
     local updatedAt = tonumber(state.healthUpdatedAt)
     local now = GetTime and GetTime() or 0
-    return IsEnemyHonorNPC(info) and updatedAt and updatedAt > 0
+    return (LT.testMode or IsEnemyHonorNPC(info)) and updatedAt and updatedAt > 0
         and (now - updatedAt) <= HEALTH_STALE_SECONDS and pct > 0 and pct < 99.95
 end
 
@@ -850,7 +856,7 @@ local function RestoreAliveBlipColor(info)
 end
 
 local function UpdateNPCCombatPulse()
-    if not LT.map or not LT.addonFrame or not LT.addonFrame:IsShown() or not IsInAlteracValley() then return end
+    if not LT.map or not LT.addonFrame or not LT.addonFrame:IsShown() or (not LT.testMode and not IsInAlteracValley()) then return end
     local now = GetTime and GetTime() or 0
     -- Same calm pulse speed as before, but use attention-grabbing yellow instead
     -- of the opposite faction color. The NPC therefore never looks like it
@@ -868,7 +874,7 @@ local function UpdateNPCCombatPulse()
             local g = baseG + ((COMBAT_YELLOW_G - baseG) * t)
             local b = baseB + ((COMBAT_YELLOW_B - baseB) * t)
             info.blip.texture:SetVertexColor(r, g, b, 1)
-        elseif info.blip and info.blip.texture and not EnsureState(info).dead then
+        elseif info.blip and info.blip.texture and not GetDisplayState(info).dead then
             RestoreAliveBlipColor(info)
         end
     end
@@ -882,7 +888,7 @@ end
 
 local function UpdateBlip(info)
     if not info or not info.blip or not LT.map then return end
-    local state = EnsureState(info)
+    local state = GetDisplayState(info)
 
     -- Live AV play displays only enemy-faction honor NPCs. AV test mode displays
     -- both factions so every static blip and patrol corridor can be inspected
@@ -1012,9 +1018,9 @@ local function UpdateDevButton()
     LT.devButton.text:SetText(string.format("HONOR %d/%d", alive, total))
 end
 
-local function StartDeathSkullFade(info)
+local function StartDeathSkullFade(info, explicitState)
     if not info or not info.blip then return end
-    local state = EnsureState(info)
+    local state = explicitState or EnsureState(info)
     if info.kind == "captain" or info.kind == "boss" then
         -- Captain/final-boss death skull is persistent by design.
         state.deathSkullExpired = false
@@ -2452,9 +2458,77 @@ function LT.RefreshScale()
 end
 
 function LT.SetTestMode(flag)
-    LT.testMode = flag and true or false
+    flag = flag and true or false
+    if flag == (LT.testMode and true or false) then return end
+    -- A marker owns its OnUpdate script during the death proc/fade. Cancel the
+    -- previous display mode's script before swapping state so an old closure can
+    -- never hide or recolor a marker from the new mode.
+    for _, info in ipairs(LIEUTENANTS) do
+        local blip = info.blip
+        if blip then
+            blip:SetScript("OnUpdate", nil)
+            blip.deathProcCallback, blip.deathProcElapsed = nil, nil
+            if blip.deathProcStarA then blip.deathProcStarA:Hide() end
+            if blip.deathProcStarB then blip.deathProcStarB:Hide() end
+            blip:SetAlpha(1)
+        end
+        if not LT.testMode then
+            local liveState = EnsureState(info)
+            if liveState.transitioning then
+                liveState.transitioning = false
+                liveState.deathSkullExpired = info.kind ~= "captain" and info.kind ~= "boss"
+            end
+        end
+    end
+    LT.testMode = flag
+    LT.testStates = nil
+    if LT.testMode then
+        LT.testStates = {}
+        for _, info in ipairs(LIEUTENANTS) do
+            LT.testStates[info.id] = {dead=false, x=info.x, y=info.y, healthPct=100, source="test"}
+        end
+    end
     for _, info in ipairs(LIEUTENANTS) do UpdateBlip(info) end
     RefreshSecureTargetButtons()
+end
+
+function LT.SetTestNPCHealth(id, healthPct)
+    local info = BY_ID[tonumber(id)]
+    if not LT.testMode or not info then return end
+    local state = GetDisplayState(info)
+    local wasDead = state.dead
+    state.healthPct = math.max(0, math.min(100, healthPct))
+    state.healthUpdatedAt = GetTime()
+    state.dead = state.healthPct == 0
+    if state.dead then HidePath(info) end
+    -- Rebuilding the complete marker on every simulated percentage change made
+    -- its texture and shadows fight the combat-pulse ticker. Health changes only
+    -- need the bar; rebuild once when crossing the alive/dead boundary.
+    if state.dead and not wasDead then
+        state.transitioning = true
+        state.deathSkullExpired = false
+        state.deathSkullFadeElapsed = nil
+        UpdateNPCHealthBar(info)
+        PlayDeathTransition(info, function()
+            -- Ignore a delayed callback after test mode was switched off/restarted.
+            if not LT.testMode or GetDisplayState(info) ~= state then return end
+            state.transitioning = false
+            UpdateBlip(info)
+            StartDeathSkullFade(info, state)
+        end)
+    elseif wasDead and not state.dead then
+        state.transitioning = false
+        state.deathSkullExpired = false
+        if info.blip then info.blip:SetScript("OnUpdate", nil); info.blip:SetAlpha(1) end
+        UpdateBlip(info)
+    else
+        UpdateNPCHealthBar(info)
+    end
+end
+
+function LT.GetDisplayState(id)
+    local info = BY_ID[tonumber(id)]
+    return info and GetDisplayState(info) or nil
 end
 
 local eventFrame=CreateFrame("Frame")

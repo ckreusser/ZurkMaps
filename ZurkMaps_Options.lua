@@ -303,6 +303,15 @@ local function EnsureMenuFrame()
         Options.SetClassBlips(not Options.UseClassBlips())
         self.value:SetText(Options.UseClassBlips() and "Class Colors" or "Gold")
     end)
+    frame.efcHealthRow = CreateValueRow(frame, "Auto EFC Health")
+    frame.efcHealthRow:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Automatic EFC Health Reports")
+        GameTooltip:AddLine("Reports the enemy flag carrier at 40%, 20%, and 10% health.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine("Zurk Maps users coordinate so one player reports each threshold, with a backup if that report never appears.", 0.75, 0.75, 0.75, true)
+        GameTooltip:Show()
+    end)
+    frame.efcHealthRow:HookScript("OnLeave", function() GameTooltip:Hide() end)
     frame.honorRow = CreateValueRow(frame, "Honor Bar")
     frame.honorLabel, frame.honorModeValue = frame.honorRow.text, frame.honorRow.value
     frame.honorClickArea = frame.honorRow
@@ -499,6 +508,8 @@ local function BuildMenu(frame, config)
     frame.title:SetText((config.mapKey or "Map") .. " Options")
     frame.currentChannel = Options.GetCalloutChannel(frame.mapKey)
     frame.testModeActive = IsTestModeActive(config)
+    frame.efcHealthEnabled = type(config.getAutoEFCHealthEnabled) == "function"
+        and config.getAutoEFCHealthEnabled() ~= false or false
     frame.honorBarMode = GetHonorBarMode(config)
     frame.honorBarVisible = frame.honorBarMode ~= "OFF"
     frame.honorBarUnlocked = IsHonorBarUnlocked(config)
@@ -544,11 +555,26 @@ local function BuildMenu(frame, config)
         UpdateTestToggleVisuals(frame)
     end)
 
+    frame.efcHealthRow:SetScript("OnClick", function()
+        if type(config.setAutoEFCHealthEnabled) ~= "function" then return end
+        config.setAutoEFCHealthEnabled(not frame.efcHealthEnabled)
+        frame.efcHealthEnabled = type(config.getAutoEFCHealthEnabled) == "function"
+            and config.getAutoEFCHealthEnabled() ~= false or false
+        frame.efcHealthRow.value:SetText(frame.efcHealthEnabled and "On" or "Off")
+        frame.efcHealthRow.value:SetTextColor(
+            frame.efcHealthEnabled and 1.0 or 0.55,
+            frame.efcHealthEnabled and 0.82 or 0.55,
+            frame.efcHealthEnabled and 0.20 or 0.55,
+            1
+        )
+    end)
+
     for _, button in ipairs(frame.buttons) do button:Hide() end
     for _, divider in ipairs(frame.dividers) do divider:Hide() end
     frame.honorRow:Hide()
     frame.honorUnlockRow:Hide()
     frame.testRow:Hide()
+    frame.efcHealthRow:Hide()
 
     local rowY = -34
     local function PlaceRow(row)
@@ -570,6 +596,16 @@ local function BuildMenu(frame, config)
     PlaceRow(frame.switchClickArea)
     frame.classButton.value:SetText(Options.UseClassBlips() and "Class Colors" or "Gold")
     PlaceRow(frame.classButton)
+    if type(config.getAutoEFCHealthEnabled) == "function" and type(config.setAutoEFCHealthEnabled) == "function" then
+        frame.efcHealthRow.value:SetText(frame.efcHealthEnabled and "On" or "Off")
+        frame.efcHealthRow.value:SetTextColor(
+            frame.efcHealthEnabled and 1.0 or 0.55,
+            frame.efcHealthEnabled and 0.82 or 0.55,
+            frame.efcHealthEnabled and 0.20 or 0.55,
+            1
+        )
+        PlaceRow(frame.efcHealthRow)
+    end
     local showHonor = (ZurkMapsHonorWidget and ZurkMapsHonorWidget.GetMode) or
         (type(config.isHonorBarVisible) == "function" and type(config.setHonorBarVisible) == "function")
     if showHonor then

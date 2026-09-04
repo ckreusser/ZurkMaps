@@ -2,6 +2,38 @@
 
 All notable changes to Zurk Maps will be documented in this file.
 
+## Unreleased
+
+## Zurk Maps 1.3.0-r19
+
+### Added
+
+- Added a WSG-only **Auto EFC Health** option, enabled by default, for automatic enemy flag-carrier reports at 40%, 20%, and 10% health.
+
+### Changed
+
+- Coordinated automatic EFC health reports between Zurk Maps users with short per-player staggering, private threshold claims, public-report cancellation, and delayed backup takeover when a claimant never reports. More urgent thresholds use shorter delays, and manual Shift-click reports remain immediate.
+- Reduced WSG teammate area animations from 12 seconds to 8 seconds and shortened the terminal fade to 0.75 seconds. Separated pulse opacity from expiry opacity so drop shadows remain stable during a pulse but fade and clear with the area, and replaced frame-dependent button easing with immediate press feedback and a fixed 90-millisecond release that handles rapid clicks.
+- Expanded the WSG, AB, AV, and Honor Bar promo rotations to eight unique messages each. Every map now has five battleground-specific promos and three uniquely worded general-feature promos, all sized for in-game chat.
+- Changed every promo pool to an independent shuffled rotation, guaranteeing all eight messages appear once before that pool repeats and preventing duplicates across rotation boundaries.
+- Reworked WSG teammate callout areas with slow, color-matched diagonal stripes, tight drop shadows, and a uniformly weighted rotating segmented border. Ambiguous areas share one stripe direction and animation phase, and the caller receipt has been removed. Hover leaves areas level; mouse-down presses them toward the anchored shadow and mouse-up snaps them back. Rebuilt every area and callout mask with supersampled antialiasing, and unified Horde Ramp's hover, pulse, and shadow on its current geometry.
+- Added WSG `e` shorthand for enemy-side locations in both attached and standalone forms, including `eroof`, `e roof`, suffix forms, ambiguous reports, and the full location vocabulary.
+- Nudged every Alliance WSG area five map pixels to the right while leaving Alliance Top of Tunnel fixed, including hover targets, callout masks, animated borders, and shadows.
+- Rebuilt AV test mode with rank 12–14 helmets and a Raid Boss blip, walking starts, three-second mount casts, slower travel, a mix of +60% and +100% mounts, and occasional 3–9% mounted-speed bonuses.
+- Made every test player immediately walk a few yards west, perform a three-second mount cast, and begin the route. Reduced all movement speeds by another 30%. Rank 12–14 and Raid Boss players always use +100% mounts; ordinary players retain the slower mount mix.
+- Added Horde breakaway routes for Balinda, Stonehearth Bunker/GY, Stormpike Aid Station, the Dun Baldar bunkers, and Stormpike GY. Mirrored Alliance advances contest Iceblood GY about ten seconds after the Horde contests Stonehearth GY.
+- Corrected the Horde cave exit to follow the access road before veering east of Iceblood GY. The main raid now curves well clear of Stonehearth Bunker's defensive fire while its assigned assault squad takes the direct approach.
+- Corrected the northern road approach past Stormpike GY and across the bridge. Squads gather immediately south of Vanndar after contesting both base bunkers, with a mirrored gathering north of Drek'Thar.
+- Assigned honor NPCs to squads already visiting their graveyards and towers. Only the Stonehearth GY scout stops for Spencer; the Balinda squad takes Lonadin and almost every Horde rider passes the graveyard. Alliance squads mirror this behavior.
+- Connected simulated flag interactions to the normal objective icons, five-minute capture clocks, and completion effects. Live objective refreshes and timer sync stay separate from the rehearsal.
+
+### Fixed
+
+- Kept WSG callout drop shadows visible through pulse troughs and fast pointer exits after clicking an area while preventing shadows from outliving the final expiry fade. Ordinary area buttons finish their mouse-up return with the shadow anchored when the pointer exits, then clear the artwork and shadow together on the exact completion frame.
+- Allowed the AV map to close while test mode continues, reopening the same run with `/av show`. Stopping tests restores live objectives and clears simulated timers and tower effects.
+- Reused AV test blip frames across restarts and kept rank helmets from being overwritten by class-dot coloring.
+- Added stationary three-second remounts after fights and flag work, keeping combat and contests at footspeed. Prevented simulated NPC health updates from repeatedly rebuilding markers, then matched live NPC deaths with the normal proc and ten-second skull fade.
+
 ## Zurk Maps 1.3.0-r18
 
 ### Added

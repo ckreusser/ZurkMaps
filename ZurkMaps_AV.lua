@@ -693,6 +693,8 @@ local friendlyPlayersElapsed = 0
 local hoveredFriendlyPlayersSignature = nil
 local avTestMode = false
 local testPreviousManualVisibility = nil
+local avTestSimulation
+local ResetObjectivesToInitial, RefreshObjectives, ApplyAVTestObjective
 local avObjectiveTimers
 
 local function GetAVUiMapID()
@@ -840,22 +842,6 @@ local AV_TEST_NAMES = {
     "Firemane","Coldhammer","Shadowfen","Wildspark","Gravewind","Redbranch","Stormhoof","Icebrand",
     "Duskrunner","Bloodpine","Mistclaw","Sunforge","Boneward","Frostveil","Warbriar","Ironstar",
 }
--- Test-mode rush routes. All 40 simulated players begin stacked at their faction's
--- starting cave, then leave in a staggered stream toward the opposing main keep.
-local AV_TEST_ROUTE_ALLIANCE = {
-    {0.675,0.050}, -- Alliance starting cave: user-marked cave at the far north-east edge
-    {0.650,0.095},{0.600,0.145},{0.545,0.210},{0.555,0.295},{0.595,0.355},
-    {0.545,0.415},{0.485,0.475},{0.530,0.535},{0.565,0.590},{0.555,0.650},
-    {0.525,0.710},{0.530,0.770},{0.515,0.825},{0.525,0.875},{0.535,0.915},
-}
-local AV_TEST_ROUTE_HORDE = {
-    {0.765,0.710}, -- Horde starting cave: user-marked cave east/southeast of Tower Point
-    {0.705,0.680},{0.635,0.645},{0.585,0.610},{0.555,0.575},{0.535,0.535},
-    {0.485,0.505},{0.455,0.460},{0.505,0.410},{0.565,0.355},{0.555,0.300},
-    {0.540,0.250},{0.500,0.205},{0.450,0.175},{0.400,0.145},{0.365,0.120},{0.350,0.100},
-}
-local AV_TEST_CLASSES_ALLIANCE = {"WARRIOR","PALADIN","HUNTER","ROGUE","PRIEST","MAGE","WARLOCK","DRUID"}
-local AV_TEST_CLASSES_HORDE = {"WARRIOR","SHAMAN","HUNTER","ROGUE","PRIEST","MAGE","WARLOCK","DRUID"}
 local avTestAgents, avTestBlips = {}, {}
 local ShowTestPlayerTooltip, ShowFriendlyPlayerTooltip
 local LockTestHoverPlayers
@@ -865,17 +851,9 @@ local testHoverLockUntil = 0
 local TEST_HOVER_GRACE = 0.55
 local TEST_HOVER_RADIUS_MULTIPLIER = 1.80
 
-local function GetTestClasses()
-    local faction = UnitFactionGroup and UnitFactionGroup("player") or "Horde"
-    return faction == "Alliance" and AV_TEST_CLASSES_ALLIANCE or AV_TEST_CLASSES_HORDE
-end
-
-local function GetAVTestRoute()
-    local faction = UnitFactionGroup and UnitFactionGroup("player") or "Horde"
-    return faction == "Alliance" and AV_TEST_ROUTE_ALLIANCE or AV_TEST_ROUTE_HORDE
-end
 
 local function ResetAVTestAgents()
+    avTestSimulation = nil
     for i = #avTestAgents, 1, -1 do avTestAgents[i] = nil end
 end
 
@@ -896,98 +874,72 @@ local function GetAVTestPlayersNearAgent(centerAgent)
 end
 
 local function InitializeAVTestAgents()
-    if #avTestAgents > 0 then return end
-    local classes = GetTestClasses()
-    local route = GetAVTestRoute()
-    local spawn = route[1]
-    for i=1,40 do
-        avTestAgents[i] = {
-            name=AV_TEST_NAMES[i] or ("AVTester"..i),
-            classToken=classes[((i - 1) % #classes) + 1],
-            iconKey="TEST:AV:"..i,
-            routeIndex=1,
-            direction=1,
-            lane=0,
-            x=spawn[1],
-            y=spawn[2],
-            speed=4.0 + ((i * 13) % 18) / 10,
-            pause=(i - 1) * 0.18,
-            finished=false,
-        }
-        local blip = CreateFrame("Button", nil, friendlyPlayersClipFrame)
-        if blip.SetFrameStrata then blip:SetFrameStrata("HIGH") end
-        blip:SetFrameLevel(mapBorder:GetFrameLevel() + 26)
-        blip:EnableMouse(true)
-        blip:RegisterForClicks("RightButtonUp")
-        blip.agentIndex = i
-        blip.shadow=blip:CreateTexture(nil,"ARTWORK")
-        blip.shadow:SetPoint("TOPLEFT",blip,"TOPLEFT",-1,1)
-        blip.shadow:SetPoint("BOTTOMRIGHT",blip,"BOTTOMRIGHT",1,-1)
-        blip.shadow:SetTexCoord(0,1,0,1)
-        blip.shadow:SetVertexColor(0,0,0,0.72)
-        blip.shadow:Hide()
-        blip.texture=blip:CreateTexture(nil,"OVERLAY")
-        blip.texture:SetAllPoints()
-        blip.texture:SetTexture("Interface\\WorldMap\\WorldMapPartyIcon")
-        blip.texture:SetTexCoord(0,1,0,1)
-        blip.texture:SetVertexColor(AV_TEST_GOLD_R,AV_TEST_GOLD_G,AV_TEST_GOLD_B,1)
-        blip:SetScript("OnEnter", function(self)
-            local agent = avTestAgents[self.agentIndex]
-            local players = GetAVTestPlayersNearAgent(agent)
-            if players then LockTestHoverPlayers(players) end
-        end)
-        -- Do not hide immediately when crossing between overlapping child buttons;
-        -- the shared hover updater below owns tooltip lifetime, just like Zurk Maps.
-        blip:SetScript("OnLeave", function() end)
-        blip:SetScript("OnClick", function(self, button)
-            if button ~= "RightButton" or not ZurkMapsPlayerIcons then return end
-            local agent = avTestAgents[self.agentIndex]
-            local players = GetAVTestPlayersNearAgent(agent)
-            if players then ZurkMapsPlayerIcons.OpenAssignmentMenuForTestPlayers(self, players) end
-        end)
-        blip:Hide()
-        avTestBlips[i]=blip
+    if not avTestSimulation then
+        avTestSimulation = ZurkMapsAVTest.Create({
+            objectives=OBJECTIVES, names=AV_TEST_NAMES, onObjective=ApplyAVTestObjective,
+            honorNPCs=ZurkMapsAVLieutenants.data,
+            onNPCState=function(npc) ZurkMapsAVLieutenants.SetTestNPCHealth(npc.id, npc.healthPct) end,
+        })
+        local faction = UnitFactionGroup and UnitFactionGroup("player") or "Horde"
+        for i, agent in ipairs(avTestSimulation.teams[faction] or avTestSimulation.teams.Horde) do
+            avTestAgents[i] = agent
+            if ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.AssignKey then
+                ZurkMapsPlayerIcons.AssignKey(agent.iconKey,
+                    agent.raidBoss and ZurkMapsPlayerIcons.RAID_BOSS_ICON_ID or nil, true)
+            end
+        end
+    end
+    for i = 1, #avTestAgents do
+        if not avTestBlips[i] then
+            local blip = CreateFrame("Button", nil, friendlyPlayersClipFrame)
+            if blip.SetFrameStrata then blip:SetFrameStrata("HIGH") end
+            blip:SetFrameLevel(mapBorder:GetFrameLevel() + 26)
+            blip:EnableMouse(true)
+            blip:RegisterForClicks("RightButtonUp")
+            blip.agentIndex = i
+            blip.shadow=blip:CreateTexture(nil,"ARTWORK")
+            blip.shadow:SetPoint("TOPLEFT",blip,"TOPLEFT",-1,1)
+            blip.shadow:SetPoint("BOTTOMRIGHT",blip,"BOTTOMRIGHT",1,-1)
+            blip.shadow:SetTexCoord(0,1,0,1)
+            blip.shadow:SetVertexColor(0,0,0,0.72)
+            blip.shadow:Hide()
+            blip.texture=blip:CreateTexture(nil,"OVERLAY")
+            blip.texture:SetAllPoints()
+            blip.texture:SetTexture("Interface\\WorldMap\\WorldMapPartyIcon")
+            blip.texture:SetTexCoord(0,1,0,1)
+            blip.texture:SetVertexColor(AV_TEST_GOLD_R,AV_TEST_GOLD_G,AV_TEST_GOLD_B,1)
+            blip:SetScript("OnEnter", function(self)
+                local agent = avTestAgents[self.agentIndex]
+                local players = GetAVTestPlayersNearAgent(agent)
+                if players then LockTestHoverPlayers(players) end
+            end)
+            -- Do not hide immediately when crossing between overlapping child buttons;
+            -- the shared hover updater below owns tooltip lifetime, just like Zurk Maps.
+            blip:SetScript("OnLeave", function() end)
+            blip:SetScript("OnClick", function(self, button)
+                if button ~= "RightButton" or not ZurkMapsPlayerIcons then return end
+                local agent = avTestAgents[self.agentIndex]
+                local players = GetAVTestPlayersNearAgent(agent)
+                if players then ZurkMapsPlayerIcons.OpenAssignmentMenuForTestPlayers(self, players) end
+            end)
+            blip:Hide()
+            avTestBlips[i]=blip
+        end
     end
 end
 
 local function AdvanceAVTestAgents(elapsed)
     InitializeAVTestAgents()
-    local route=GetAVTestRoute()
-    local mapWidth=map:GetWidth() or MAP_WIDTH
-    local mapHeight=map:GetHeight() or MAP_HEIGHT
-    for _,agent in ipairs(avTestAgents) do
-        if agent.pause and agent.pause>0 then
-            agent.pause=math.max(0,agent.pause-elapsed)
-        elseif not agent.finished then
-            local nextIndex=agent.routeIndex+1
-            if nextIndex>#route then
-                agent.finished=true
-            else
-                local target=route[nextIndex]
-                local tx=math.max(0.03,math.min(0.97,target[1]))
-                local ty=target[2]
-                local dxPixels=(tx-agent.x)*mapWidth
-                local dyPixels=(ty-agent.y)*mapHeight
-                local distance=math.sqrt(dxPixels*dxPixels+dyPixels*dyPixels)
-                local step=agent.speed*elapsed
-                if distance<0.01 or step>=distance then
-                    agent.x,agent.y=tx,ty
-                    agent.routeIndex=nextIndex
-                    if agent.routeIndex==#route then
-                        agent.finished=true
-                    elseif (agent.routeIndex % 5)==0 then
-                        agent.pause=0.20
-                    end
-                else
-                    agent.x=agent.x+(dxPixels/distance)*step/mapWidth
-                    agent.y=agent.y+(dyPixels/distance)*step/mapHeight
-                end
-            end
-        end
+    for _, agent in ipairs(avTestAgents) do
+        local assigned = ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.GetAssignedIconForKey
+            and ZurkMapsPlayerIcons.GetAssignedIconForKey(agent.iconKey, true)
+        avTestSimulation:SetFeatured(agent, assigned and assigned == ZurkMapsPlayerIcons.RAID_BOSS_ICON_ID)
     end
+    avTestSimulation:Advance(elapsed)
 end
 
 local function UpdateAVTestBlips()
+    if not avTestMode then return end
     InitializeAVTestAgents()
     local dotSize=ZurkMapsPlayerBlips.GetDotSize(AV_FRIENDLY_PLAYER_DOT_SIZE,frame)
     local mapWidth=map:GetWidth() or MAP_WIDTH
@@ -995,6 +947,8 @@ local function UpdateAVTestBlips()
     for i,agent in ipairs(avTestAgents) do
         local blip=avTestBlips[i]
         local assigned=ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.GetAssignedIconForKey and ZurkMapsPlayerIcons.GetAssignedIconForKey(agent.iconKey,true) or nil
+        avTestSimulation:SetFeatured(agent, assigned and assigned == ZurkMapsPlayerIcons.RAID_BOSS_ICON_ID)
+        blip:SetFrameLevel(mapBorder:GetFrameLevel() + 26 + (assigned and 2 or (agent.pvpRankNumber and 1 or 0)))
         if assigned and ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.ApplyAssignedIcon then
             if ZurkMapsPlayerIcons.IsOverlayOnlyIcon and ZurkMapsPlayerIcons.IsOverlayOnlyIcon(assigned) then
                 ZurkMapsPlayerBlips.ApplyGoldBlip(blip,dotSize,AV_TEST_GOLD_R,AV_TEST_GOLD_G,AV_TEST_GOLD_B)
@@ -1002,10 +956,14 @@ local function UpdateAVTestBlips()
             else
                 ZurkMapsPlayerIcons.ApplyAssignedIcon(blip,assigned,dotSize*(ZurkMapsPlayerIcons.manualIconScale or 0.84))
             end
+        elseif agent.pvpRankNumber then
+            ZurkMapsPlayerBlips.ApplyRankBadge(blip,agent.pvpRankNumber,
+                dotSize * (AVMapRank and AVMapRank.iconScale or .924),agent.classToken)
         else
             ZurkMapsPlayerBlips.ApplyGoldBlip(blip,dotSize,AV_TEST_GOLD_R,AV_TEST_GOLD_G,AV_TEST_GOLD_B)
         end
-        if (not assigned or (ZurkMapsPlayerIcons.IsOverlayOnlyIcon and ZurkMapsPlayerIcons.IsOverlayOnlyIcon(assigned))) then
+        if (assigned and ZurkMapsPlayerIcons.IsOverlayOnlyIcon and ZurkMapsPlayerIcons.IsOverlayOnlyIcon(assigned))
+            or (not assigned and not agent.pvpRankNumber) then
             ZurkMapsPlayerBlips.ApplyTeammateColor(blip, agent.classToken, assigned)
         end
         blip:ClearAllPoints()
@@ -1019,7 +977,8 @@ local function HideAVTestBlips()
 end
 
 local testMovementElapsed=0
-local testMovementFrame=CreateFrame("Frame", nil, frame)
+-- A parentless driver keeps the rehearsal running while the user closes the map.
+local testMovementFrame=CreateFrame("Frame")
 testMovementFrame:SetScript("OnUpdate",function(_,elapsed)
     if not avTestMode then return end
     testMovementElapsed=testMovementElapsed+elapsed
@@ -1027,7 +986,7 @@ testMovementFrame:SetScript("OnUpdate",function(_,elapsed)
     local step=testMovementElapsed
     testMovementElapsed=0
     AdvanceAVTestAgents(step)
-    UpdateAVTestBlips()
+    if frame:IsShown() then UpdateAVTestBlips() end
 end)
 
 local function GetMapMousePercent()
@@ -1263,6 +1222,7 @@ end
 ShowTestPlayerTooltip = function(players)
     if not players or #players==0 then return false end
     local signature=GetTestPlayersSignature(players)
+    if #players == 1 then signature = signature .. ":" .. (players[1].phase or "") end
     if hoveredFriendlyPlayersSignature==signature and GameTooltip:IsShown() then return true end
     hoveredFriendlyPlayersSignature=signature
     GameTooltip:SetOwner(UIParent,"ANCHOR_NONE")
@@ -1272,6 +1232,12 @@ ShowTestPlayerTooltip = function(players)
     for _,player in ipairs(players) do
         local r,g,b=GetClassColorForToken(player.classToken)
         GameTooltip:AddLine(ZurkMapsPlayerBlips.GetTooltipIconTagForTestPlayer(player)..player.name,r,g,b)
+    end
+    if #players == 1 then
+        local player = players[1]
+        GameTooltip:AddLine("Test: " .. (player.phase or "waiting"), .72, .66, .50)
+        GameTooltip:AddLine(string.format("Mount: +%d%%  |  Bonus: +%d%%",
+            math.floor(player.mountIncrease * 100 + .5), math.floor(player.mountBonus * 100 + .5)), .82, .82, .82)
     end
     local tooltipName=GameTooltip:GetName()
     if tooltipName then
@@ -1426,6 +1392,7 @@ local function SetTestMode(flag)
         testPreviousManualVisibility=manualVisibility
         manualVisibility="show"
         avTestMode=true
+        ResetObjectivesToInitial()
         if ZurkMapsAVLieutenants and ZurkMapsAVLieutenants.SetTestMode then ZurkMapsAVLieutenants.SetTestMode(true) end
         if friendlyPlayersFrame then friendlyPlayersFrame:Hide() end
         ClearTestHoverLock()
@@ -1436,6 +1403,9 @@ local function SetTestMode(flag)
         UpdateLivePlayerHitButtons()
     else
         avTestMode=false
+        avTestSimulation=nil
+        ResetObjectivesToInitial()
+        RefreshObjectives()
         if ZurkMapsAVLieutenants and ZurkMapsAVLieutenants.SetTestMode then ZurkMapsAVLieutenants.SetTestMode(false) end
         ClearTestHoverLock()
         HideAVTestBlips()
@@ -1538,7 +1508,7 @@ if ZurkMapsAVTimers and ZurkMapsAVTimers.Create then
         mapBorder=mapBorder,
         objectives=OBJECTIVES,
         buttons=objectiveButtons,
-        isInAlteracValley=IsInAlteracValley,
+        isInAlteracValley=function() return not avTestMode and IsInAlteracValley() end,
         getPlayerFaction=function() return UnitFactionGroup and UnitFactionGroup("player") or nil end,
         getCalloutChannel=function()
             if ZurkMapsOptions and ZurkMapsOptions.GetCalloutChannel then return ZurkMapsOptions.GetCalloutChannel("AV") end
@@ -1555,7 +1525,7 @@ if ZurkMapsAVTimers and ZurkMapsAVTimers.Create then
     })
 end
 
-local function ResetObjectivesToInitial()
+ResetObjectivesToInitial = function()
     for _, objective in ipairs(OBJECTIVES) do
         objective.currentTexture=objective.defaultTexture
         objective.status=objective.initialStatus or "Initial control"
@@ -1612,7 +1582,28 @@ local function ApplyLiveObjectiveState(objective, textureIndex, description, are
     return true
 end
 
-local function RefreshObjectives()
+ApplyAVTestObjective = function(event, simulation)
+    if not avTestMode then return end
+    for _, objective in ipairs(OBJECTIVES) do
+        if objective.id == event.id then
+            local alliance = event.faction == "Alliance"
+            local contested = event.phase == "contested"
+            local texture = objective.kind == "tower"
+                and (contested and (alliance and 8 or 11) or 5)
+                or (contested and (alliance and 3 or 13) or (alliance and 14 or 12))
+            local status = contested and (event.faction .. " assaulting")
+                or (objective.kind == "tower" and ("Destroyed by " .. event.faction) or (event.faction .. " controlled"))
+            ApplyLiveObjectiveState(objective, texture, status)
+            if contested and avObjectiveTimers then
+                avObjectiveTimers:SetRemaining(objective, simulation.captureSeconds, "test")
+            end
+            return
+        end
+    end
+end
+
+RefreshObjectives = function()
+    if avTestMode then return end
     if not IsInAlteracValley() then return end
 
     local calibrationByID={}
@@ -1704,14 +1695,12 @@ end)
 local wasInAVForObjectives=false
 local function UpdateVisibility()
     local inAV=IsInAlteracValley()
-    if wasInAVForObjectives and not inAV then
+    if wasInAVForObjectives and not inAV and not avTestMode then
         ResetObjectivesToInitial()
         ClearFriendlyPlayerTooltip()
     end
     wasInAVForObjectives=inAV
-    if avTestMode then
-        frame:Show()
-    elseif manualVisibility=="show" then
+    if manualVisibility=="show" then
         frame:Show()
     elseif manualVisibility=="hide" then
         frame:Hide()
@@ -1743,8 +1732,8 @@ end
 SLASH_AVCALLOUTS1="/av"
 SlashCmdList["AVCALLOUTS"]=function(msg)
     msg=string.lower((msg or ""):match("^%s*(.-)%s*$"))
-    if msg=="show" then manualVisibility="show"; UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV map shown.")
-    elseif msg=="hide" then manualVisibility="hide"; UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV map hidden.")
+    if msg=="show" then manualVisibility="show"; if avTestMode then testPreviousManualVisibility="show" end; UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV map shown.")
+    elseif msg=="hide" then manualVisibility="hide"; if avTestMode then testPreviousManualVisibility="hide" end; UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV map hidden.")
     elseif msg=="reset" then ResetLayout(); print("|cff33ff99Zurk Maps|r AV position and size reset.")
     elseif msg=="refresh" then RefreshObjectives(); print("|cff33ff99Zurk Maps|r AV objectives refreshed.")
     elseif msg=="test" then SetTestMode(true); UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV test mode enabled.")

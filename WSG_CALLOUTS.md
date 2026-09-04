@@ -24,9 +24,17 @@ Inside Warsong Gulch, use `/bg` instead of `/s` in these examples, such as `/bg 
 | `/s efc leaf hut construction` | Horde leaf-hut area |
 | `/s tun` | Both tunnels; short location-only answers work too |
 
-Each accepted report replaces the previous one, pulses for 12 seconds, and fades during its last two seconds. All possible areas pulse together. A full-width receipt beneath the CAP/PICK buttons identifies the sender and report, using the same bronze border, dark brown background, and Warcraft lettering as the map panels. Mouse hover, map clicking, and player blips continue to work.
+Each accepted report replaces the previous one, animates for 8 seconds, and fades during its last 0.75 seconds. Every possible area uses its own callout color, a tight drop shadow, a uniformly weighted rotating segmented border, mostly transparent diagonal stripes, and a supersampled antialiased edge mask. Ambiguous areas share the same stripe direction and phase. Hover leaves areas at their normal map position; mouse-down immediately presses them toward the anchored shadow and mouse-up returns them over 90 milliseconds. The shadow ignores pulse troughs but follows the final expiry fade exactly. Map clicking and player blips continue to work.
+
+A standalone or attached `e` means enemy. For a Horde player, `e roof`, `eroof`, `roof e`, and `roof or gy e` resolve to the Alliance side; the same reports resolve to the Horde side for an Alliance player. The attached form works with the full location vocabulary, such as `ebanana` and `etop of tunnel`.
 
 `/wsg callouts off` disables the listener's visual responses and saves that preference. `/wsg callouts on` enables them. `/wsg callouts clear` clears the current report. Hiding the map, stopping test mode, reloading, or changing world/instance clears reports. Reports received while the map is hidden are discarded.
+
+## Automatic EFC health reports
+
+The WSG options menu includes **Auto EFC Health**, enabled by default. While Zurk Maps has a live unit for the enemy flag carrier, it automatically reports downward crossings at 40%, 20%, and 10%. A five-point heal re-arms a crossed threshold, with a five-second barrier on same-band recovery updates. Manual Shift-click health reports remain immediate regardless of this setting.
+
+Zurk Maps clients briefly coordinate before an automatic report. A stable per-player stagger selects an early candidate, that client sends a private addon claim, and peers cancel their pending copy when the public report appears. A more urgent threshold can supersede an earlier candidate. If the claimant never reports, another client takes over after a short backup delay. Clients also recognize the public Zurk Maps health format, which provides duplicate suppression when private addon messaging is unavailable.
 
 ## Research findings
 

@@ -35,6 +35,13 @@ Parse("efr", {"HORDE_FLAG_ROOM"}, "Alliance")
 Parse("EFC eTun", {"ALLY_TUNNEL"})
 Parse("EFC EGY", {"ALLY_GRAVEYARD"})
 Parse("EFC eRoOf", {"ALLY_ROOF"})
+Parse("E roof", {"ALLY_ROOF"})
+Parse("roof e", {"ALLY_ROOF"})
+Parse("roof or gy e", {"ALLY_ROOF", "ALLY_GRAVEYARD"})
+Parse("e roof", {"HORDE_ROOF"}, "Alliance")
+Parse("e banana", {"ALLY_BANANA"})
+Parse("ebanana", {"ALLY_BANANA"})
+Parse("etop of tunnel", {"ALLY_TOP_OF_TUNNEL"})
 Parse("efc their fc", {})
 Parse("their fc roof", Both("ROOF")) -- the subject does not imply its current base
 Parse("EFC roof or gy", {"ALLY_ROOF", "HORDE_ROOF", "ALLY_GRAVEYARD", "HORDE_GRAVEYARD"})
@@ -155,6 +162,13 @@ function Frame:RegisterEvent(event) self.events[event] = true end
 function Frame:SetAlpha(alpha) self.alpha = alpha end
 function Frame:SetColorTexture(...) self.color = {...} end
 function Frame:SetTexture(texture) self.texturePath = texture end
+function Frame:AddMaskTexture(mask)
+    self.masks = self.masks or {}
+    self.masks[#self.masks + 1] = mask
+end
+function Frame:SetBlendMode(mode) self.blendMode = mode end
+function Frame:SetVertexColor(...) self.vertexColor = {...} end
+function Frame:SetTexCoord(...) self.texCoord = {...} end
 function Frame:SetTextColor(...) self.textColor = {...} end
 function Frame:SetFont(...) self.font = {...} end
 function Frame:SetJustifyH(justify) self.justifyH = justify end
@@ -173,6 +187,7 @@ function CreateFrame(_, _, parent)
     return setmetatable({shown = true, parent = parent, scripts = {}, events = {}}, Frame)
 end
 function Frame:CreateTexture() return CreateFrame("Texture", nil, self) end
+function Frame:CreateMaskTexture() return CreateFrame("MaskTexture", nil, self) end
 function Frame:CreateFontString() return CreateFrame("FontString", nil, self) end
 function Frame:CreateLine() return CreateFrame("Line", nil, self) end
 
@@ -194,6 +209,18 @@ Equal(Incoming.IsFriendlySender(targetGUID), false, "hostile unit beats race fal
 faction, cachedRace = "Horde", "Orc"
 ZurksWSGCalloutMapDB = {}
 map = CreateFrame("Frame")
+local allyTunnelZone, allyTopTunnelZone
+for _, zone in ipairs(TEST_ZONES) do
+    if zone.id == "ALLY_TUNNEL" then allyTunnelZone = zone end
+end
+for _, zone in ipairs(TEST_NESTED_ZONES) do
+    if zone.id == "ALLY_TOP_OF_TUNNEL" then allyTopTunnelZone = zone end
+end
+local allyTunnelVisualPoints = Incoming.GetVisualZonePoints(allyTunnelZone)
+local allyTopTunnelVisualPoints = Incoming.GetVisualZonePoints(allyTopTunnelZone)
+assert(math.abs((allyTunnelVisualPoints[1][1] - allyTunnelZone.points[1][1]) - Incoming.Visual.allianceNudgePercent) < 0.001, "Alliance areas move five map pixels right")
+assert(math.abs(allyTopTunnelVisualPoints[1][1] - (allyTopTunnelZone.cx + allyTopTunnelZone.rx)) < 0.001, "Alliance Top of Tunnel stays in place")
+checks = checks + 2
 local actionRow = CreateFrame("Frame")
 local controller = Incoming.Create(map, TEST_ZONES, TEST_NESTED_ZONES, CreateWSGHighlight, actionRow)
 Equal(controller.listener.events.CHAT_MSG_SAY, true, "say registered")
@@ -205,20 +232,61 @@ local function Say(message, guid)
 end
 Say("efc tun")
 Equal(IDs(controller.activeIDs), IDs(Both("TUNNEL")), "real event arg12")
-Equal(controller.expiresAt, 112, "expiry")
+Equal(controller.expiresAt, 108, "eight-second expiry")
 Equal(controller.overlays.ALLY_TUNNEL.texture.texturePath, "Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\ALLY_TUNNEL", "reuse real highlight artwork")
 Equal(controller.overlays.ALLY_TUNNEL.mouse, false, "click through")
 local firstOverlay = controller.overlays.ALLY_TUNNEL
+Equal(firstOverlay.calloutActive, true, "callout animation enabled")
+assert((firstOverlay.calloutFillCount or 0) > 0, "callout interior drawn without solid outline")
+assert((firstOverlay.calloutStripeCount or 0) > 0, "callout stripes drawn")
+assert((firstOverlay.calloutBorderCount or 0) >= 16, "segmented border drawn")
+Equal(firstOverlay.texture.shown, false, "continuous callout border hidden")
+Equal(firstOverlay.calloutMask.texturePath, "Interface\\AddOns\\ZurkMaps\\Media\\CalloutMasks\\ALLY_TUNNEL", "antialiased callout mask selected")
+Equal(firstOverlay.calloutFillTexture.masks[1], firstOverlay.calloutMask, "callout fill is masked")
+Equal(firstOverlay.calloutStripeTexture.masks[1], firstOverlay.calloutMask, "callout stripes are masked")
+local firstStripeU = firstOverlay.calloutStripeTexture.texCoord[1]
+local firstBorderX = firstOverlay.calloutBorderSegments[1].startPoint[3]
+Equal(firstOverlay.calloutBorderSegments[1].alpha, firstOverlay.calloutBorderSegments[2].alpha, "uniform segmented border")
+Equal(firstOverlay.shadowMode, "CALLOUT", "callout drop shadow enabled")
+Equal(controller:SetAreaInteraction("ALLY_TUNNEL", true, false), true, "active callout accepts hover interaction")
+firstOverlay:UpdateInteractionAnimation(1)
+local calloutRaisedOffset = firstOverlay.contentOffset
+assert(math.abs(calloutRaisedOffset) < 0.01, "active callout stays level on hover")
+controller:SetAreaInteraction("ALLY_TUNNEL", true, true)
+firstOverlay:UpdateInteractionAnimation(1)
+assert(firstOverlay.contentOffset > 1, "active callout area presses toward shadow")
+controller:SetAreaInteraction("ALLY_TUNNEL", true, false)
+firstOverlay:UpdateInteractionAnimation(1)
+assert(math.abs(firstOverlay.contentOffset) < 0.01, "active callout snaps level on release")
+controller:SetAreaInteraction(nil, false, false)
+firstOverlay:UpdateInteractionAnimation(1)
+assert(math.abs(firstOverlay.contentOffset) < 0.01, "active callout settles after hover")
+controller:SetAreaInteraction("ALLY_TUNNEL", true, true)
+firstOverlay:UpdateInteractionAnimation(0.05)
+controller:SetAreaInteraction(nil, false, false)
+firstOverlay:UpdateInteractionAnimation(0.05)
+Equal(firstOverlay.shadowMode, "CALLOUT", "leaving directly from mouse-down preserves callout shadow mode")
+Equal(firstOverlay.shadowTexture.shown, true, "leaving directly from mouse-down preserves callout shadow")
+checks = checks + 9
 clock = 100.6
 controller.driver.scripts.OnUpdate()
-assert(controller.overlays.ALLY_TUNNEL.alpha < 0.25, "pulse trough")
-checks = checks + 1
+assert(controller.overlays.ALLY_TUNNEL.calloutPulseAlpha < 0.25, "callout artwork reaches pulse trough")
+Equal(controller.overlays.ALLY_TUNNEL.alpha, 1, "callout frame stays opaque for persistent shadow")
+Equal(controller.overlays.ALLY_TUNNEL.shadowTexture.shown, true, "fast hover exit keeps callout shadow visible")
+Equal(controller.overlays.ALLY_TUNNEL.shadowTexture.vertexColor[4], Incoming.Visual.shadowAlpha, "callout shadow ignores pulse trough")
+assert(firstOverlay.calloutStripeTexture.texCoord[1] ~= firstStripeU, "callout stripes advance")
+assert(firstOverlay.calloutBorderSegments[1].startPoint[3] ~= firstBorderX, "segmented border rotates")
+Equal(firstOverlay.calloutBorderSegments[1].alpha, firstOverlay.calloutBorderSegments[2].alpha, "rotating dashes stay uniform")
+checks = checks + 3
 Say("efc our ramp")
 Equal(IDs(controller.activeIDs), "HORDE_RAMP", "replace previous report")
 Equal(firstOverlay.shown, false, "old region hidden")
-Equal(controller.overlays.HORDE_RAMP.texture.shown, false, "ramp uses edited geometry")
-assert(#controller.overlays.HORDE_RAMP.fills > 0, "ramp polygon drawn")
-Equal(#controller.overlays.HORDE_RAMP.edges, 8, "ramp outline")
+Equal(firstOverlay.calloutActive, false, "old region animation stopped")
+Equal(controller.overlays.HORDE_RAMP.texture.shown, false, "continuous ramp border hidden during callout")
+Equal(controller.overlays.HORDE_RAMP.texture.texturePath, "Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\HORDE_RAMP", "ramp uses regenerated artwork")
+Equal(controller.overlays.HORDE_RAMP.calloutMask.texturePath, "Interface\\AddOns\\ZurkMaps\\Media\\CalloutMasks\\HORDE_RAMP", "ramp uses matching callout mask")
+Equal(controller.overlays.HORDE_RAMP.shadowTexture.texturePath, controller.overlays.HORDE_RAMP.texture.texturePath, "ramp shadow shares hover geometry")
+Equal(controller.overlays.HORDE_RAMP.shadowTexture.shown, true, "ramp drop shadow shown")
 checks = checks + 1
 Say("where efc?")
 Equal(IDs(controller.activeIDs), "HORDE_RAMP", "question does not replace valid report")
@@ -226,14 +294,24 @@ Say("efc roof", "Creature-1-enemy")
 Equal(IDs(controller.activeIDs), "HORDE_RAMP", "reject NPC event")
 Say("efc tun")
 Equal(controller.overlays.ALLY_TUNNEL, firstOverlay, "reuse frame pool")
-clock = controller.expiresAt - 1
+clock = controller.expiresAt - Incoming.FADE_DURATION - 0.01
 controller.driver.scripts.OnUpdate()
-assert(firstOverlay.alpha <= 0.5, "final two-second fade")
-checks = checks + 1
+Equal(firstOverlay.calloutExpiryAlpha, 1, "terminal fade does not begin early")
+clock = controller.expiresAt - (Incoming.FADE_DURATION / 2)
+controller.driver.scripts.OnUpdate()
+assert(firstOverlay.calloutPulseAlpha <= 0.5, "short terminal fade")
+assert(math.abs(firstOverlay.calloutExpiryAlpha - 0.5) < 0.001, "expiry fade is separate from pulse")
+assert(math.abs(firstOverlay.shadowTexture.vertexColor[4] - (Incoming.Visual.shadowAlpha * 0.5)) < 0.001, "shadow follows expiry fade")
+clock = controller.expiresAt - 0.01
+controller.driver.scripts.OnUpdate()
+assert(firstOverlay.shadowTexture.vertexColor[4] < 0.01, "shadow is effectively gone before expiry completes")
+checks = checks + 5
 clock = controller.expiresAt
 controller.driver.scripts.OnUpdate()
 Equal(#controller.activeIDs, 0, "expired regions cleared")
 Equal(controller.driver.shown, false, "idle updater stopped")
+Equal(firstOverlay.calloutActive, false, "expired animation stopped")
+Equal(firstOverlay.shadowTexture.shown, false, "expired animation clears shadow immediately")
 Say("efc tot")
 Equal(IDs(controller.activeIDs), IDs(Both("TOP_OF_TUNNEL")), "nested region render")
 map:Hide()
@@ -252,6 +330,44 @@ ZurksWSGCalloutMapDB.incomingCallouts = true
 Say("efc roof")
 Equal(#controller.activeIDs, 2, "re-enabled")
 controller:Clear()
+
+local hoverOverlay = CreateWSGHighlight()
+hoverOverlay:SetZone(TEST_ZONES[1])
+hoverOverlay:SetHoverInteraction(true)
+hoverOverlay:UpdateInteractionAnimation(1)
+local raisedOffset = hoverOverlay.contentOffset
+local anchoredShadow = raisedOffset + hoverOverlay.shadowTexture.point[4]
+assert(hoverOverlay.shadowTexture.shown and math.abs(raisedOffset) < 0.01, "hover keeps area level")
+assert(anchoredShadow < 2.2, "hover shadow tightened")
+hoverOverlay:SetInteractionPressed(true)
+assert(hoverOverlay.contentOffset > 1, "fast mouse-down applies before the next animation frame")
+hoverOverlay:UpdateInteractionAnimation(1)
+local pressedOffset = hoverOverlay.contentOffset
+assert(pressedOffset > 1, "mouse down moves area toward shadow")
+assert(math.abs((pressedOffset + hoverOverlay.shadowTexture.point[4]) - anchoredShadow) < 0.01, "shadow remains anchored while area moves")
+hoverOverlay:SetInteractionPressed(false)
+hoverOverlay:UpdateInteractionAnimation(0.01)
+assert(hoverOverlay.contentOffset > 0.02, "mouse-up return remains in progress")
+hoverOverlay:SetHoverInteraction(false)
+Equal(hoverOverlay:IsFinishingHoverRelease(), true, "fast pointer exit preserves release animation")
+Equal(hoverOverlay.shadowTexture.shown, true, "fast pointer exit preserves release shadow")
+hoverOverlay:UpdateInteractionAnimation(0.01)
+Equal(hoverOverlay.shadowTexture.shown, true, "release shadow stays through unfinished return")
+hoverOverlay:UpdateInteractionAnimation(1)
+assert(math.abs(hoverOverlay.contentOffset) < 0.01, "mouse-up snaps area level")
+Equal(hoverOverlay.shadowTexture.shown, false, "release completion clears hover shadow immediately")
+Equal(hoverOverlay.shown, false, "release completion clears hover artwork immediately")
+hoverOverlay:Show()
+hoverOverlay:SetHoverInteraction(true)
+hoverOverlay:SetInteractionPressed(true)
+hoverOverlay:SetInteractionPressed(false)
+hoverOverlay:UpdateInteractionAnimation(0.02)
+hoverOverlay:SetInteractionPressed(true)
+assert(hoverOverlay.contentOffset > 1 and not hoverOverlay.releaseActive, "second fast press replaces unfinished release")
+hoverOverlay:SetInteractionPressed(false)
+hoverOverlay:UpdateInteractionAnimation(Incoming.Visual.releaseDuration)
+assert(math.abs(hoverOverlay.contentOffset) < 0.001 and not hoverOverlay.releaseActive, "fast repeated click finishes on exact release duration")
+checks = checks + 12
 
 -- /bg uses instance chat for ordinary teammates and the battleground leader.
 local function Battleground(message, leader, guid)
@@ -276,7 +392,7 @@ Equal(controller.lastAuthor, "Teammate-Realm", "BG caller retained")
 clock = clock + 2
 Battleground("efc their roof", true)
 Equal(IDs(controller.activeIDs), "ALLY_ROOF", "leader report replaces ordinary report")
-Equal(controller.expiresAt, clock + 12, "BG report refreshes expiry")
+Equal(controller.expiresAt, clock + 8, "BG report refreshes eight-second expiry")
 Battleground("where efc?")
 Equal(IDs(controller.activeIDs), "ALLY_ROOF", "BG question does not replace report")
 Battleground("efc tunnel", false, "Creature-1-test")

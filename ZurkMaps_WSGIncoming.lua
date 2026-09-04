@@ -2,9 +2,8 @@
 -- notes live in WSG_CALLOUTS.md. Parse is independent of the WoW UI for testing.
 ZurkMapsWSGIncoming = {}
 local Incoming = ZurkMapsWSGIncoming
-Incoming.DURATION = 12
-Incoming.RECEIPT_HEIGHT = 36
-Incoming.RECEIPT_OVERLAP = 3
+Incoming.DURATION = 8
+Incoming.FADE_DURATION = 0.75
 
 local vocabulary = {}
 local function Words(text)
@@ -75,6 +74,7 @@ local qualifiers = {
     north = "ALLY", northern = "ALLY", south = "HORDE", southern = "HORDE",
     our = "friendly", ours = "friendly", own = "friendly", home = "friendly", friendly = "friendly",
     their = "enemy", theirs = "enemy", enemy = "enemy", enemys = "enemy", opposing = "enemy",
+    e = "enemy",
 }
 local filler = {}
 for _, word in ipairs(Words("efc fc ffc is at in on the a an of to from near by going heading moving running leaving exiting entering toward towards through down up out outside inside now still seen spotted last maybe possibly probably or and then but actually instead he hes she shes they theyre it its there here back side end jump off ;")) do filler[word] = true end
@@ -110,7 +110,23 @@ function Incoming.Parse(message, faction)
     if type(message) ~= "string" or #message > 1024 then return {} end
     -- Questions are requests for information, not sightings.
     if message:find("?", 1, true) then return {} end
-    local tokens = Normalize(message)
+    local normalizedTokens = Normalize(message)
+    local tokens, hasEnemyShorthand = {}, false
+    for _, token in ipairs(normalizedTokens) do
+        local suffix = token ~= "efc" and token:sub(1, 1) == "e" and #token > 1 and token:sub(2) or nil
+        if token == "e" then
+            tokens[#tokens + 1] = token
+            hasEnemyShorthand = true
+        elseif suffix and vocabulary[suffix] then
+            -- A leading E is common WSG shorthand for "enemy": eroof, etun,
+            -- ebanana, and the equivalent spaced forms all share one rule.
+            tokens[#tokens + 1] = "e"
+            tokens[#tokens + 1] = suffix
+            hasEnemyShorthand = true
+        else
+            tokens[#tokens + 1] = token
+        end
+    end
     if questions[tokens[1]] then return {} end
     local explicit = false
     for _, token in ipairs(tokens) do
@@ -154,15 +170,16 @@ function Incoming.Parse(message, faction)
     local function Include(id)
         if not seen[id] then seen[id] = true; result[#result + 1] = id end
     end
-    local subject, side, negated, previous = "efc", nil, false, 0
+    local shorthandSide = hasEnemyShorthand and ResolveSide("enemy", faction) or nil
+    local subject, side, negated, previous = "efc", shorthandSide, false, 0
     for matchIndex, match in ipairs(matches) do
         local gapSide, conflictingSide, hasQualifier
         for position = previous + 1, match.first - 1 do
             local token = tokens[position]
             if token == "efc" or token == "fc" or token == "ffc" then
-                subject, side, negated, gapSide, conflictingSide, hasQualifier = token, nil, false, nil, nil, nil
+                subject, side, negated, gapSide, conflictingSide, hasQualifier = token, shorthandSide, false, nil, nil, nil
             elseif token == ";" then
-                side, gapSide, conflictingSide, hasQualifier = nil, nil, nil, nil
+                side, gapSide, conflictingSide, hasQualifier = shorthandSide, nil, nil, nil
             elseif corrections[token] then
                 negated = false
             elseif negations[token] then
@@ -175,7 +192,7 @@ function Incoming.Parse(message, faction)
         end
         if conflictingSide then side = nil elseif hasQualifier then side = gapSide end
         local options = match.entry.options
-        local selectedSide = options.side and ResolveSide(options.side, faction) or side
+        local selectedSide = options.side and ResolveSide(options.side, faction) or side or shorthandSide
         -- Also accept suffix forms such as "efc roof horde". A qualifier before
         -- another location belongs to that following location, never both.
         if matchIndex == #matches then
@@ -254,38 +271,7 @@ function Incoming.IsFriendlySender(guid)
     return false
 end
 
-local function ColorCallerName(name, guid)
-    local _, classToken
-    if guid == UnitGUID("player") and UnitClass then
-        _, classToken = UnitClass("player")
-    elseif GetPlayerInfoByGUID then
-        _, classToken = GetPlayerInfoByGUID(guid)
-    end
-    if not classToken and UnitClass then
-        local units = {"target", "focus", "mouseover"}
-        local raid = IsInRaid and IsInRaid()
-        for index = 1, (raid and 40 or 4) do units[#units + 1] = (raid and "raid" or "party") .. index end
-        for _, unit in ipairs(units) do
-            if UnitGUID(unit) == guid then
-                _, classToken = UnitClass(unit)
-                break
-            end
-        end
-    end
-    if not classToken then return name end
-    local r, g, b
-    if ZurkMapsPlayerBlips and ZurkMapsPlayerBlips.GetBlipClassColor then
-        r, g, b = ZurkMapsPlayerBlips.GetBlipClassColor(classToken)
-    else
-        local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
-        if color then r, g, b = color.r, color.g, color.b end
-    end
-    if not r then return name end
-    return string.format("|cff%02x%02x%02x%s|r",
-        math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5), name)
-end
-
-function Incoming.Create(map, zones, nestedZones, createHighlight, actionRow)
+function Incoming.Create(map, zones, nestedZones, createHighlight)
     local controller = {overlays = {}, zones = {}, activeIDs = {}}
     for _, list in ipairs({zones, nestedZones}) do
         for _, zone in ipairs(list) do controller.zones[zone.id] = zone end
@@ -296,45 +282,40 @@ function Incoming.Create(map, zones, nestedZones, createHighlight, actionRow)
     driver:Hide()
     controller.driver = driver
 
-    -- Continue the CAP/PICK panel below the map, sharing its width and skin.
-    -- Parenting to the action row keeps the footer in the map's scale/opacity
-    -- hierarchy without covering the map artwork or capturing button clicks.
-    local receipt = CreateFrame("Frame", nil, actionRow, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    -- Overlap the tooltip borders' transparent padding so the visible rims meet.
-    receipt:SetPoint("TOPLEFT", actionRow, "BOTTOMLEFT", 0, Incoming.RECEIPT_OVERLAP)
-    receipt:SetPoint("TOPRIGHT", actionRow, "BOTTOMRIGHT", 0, Incoming.RECEIPT_OVERLAP)
-    receipt:SetHeight(Incoming.RECEIPT_HEIGHT)
-    receipt:SetFrameLevel(actionRow:GetFrameLevel() + 1)
-    receipt:EnableMouse(false)
-    if receipt.SetBackdrop and actionRow.GetBackdrop then
-        receipt:SetBackdrop(actionRow:GetBackdrop())
-        receipt:SetBackdropColor(actionRow:GetBackdropColor())
-        receipt:SetBackdropBorderColor(actionRow:GetBackdropBorderColor())
-    end
-    local title = receipt:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    title:SetPoint("TOPLEFT", 8, -5)
-    title:SetPoint("TOPRIGHT", -8, -5)
-    title:SetHeight(11)
-    title:SetFont("Fonts\\FRIZQT__.TTF", 10, "OUTLINE")
-    title:SetTextColor(0.72, 0.66, 0.50)
-    title:SetJustifyH("CENTER")
-    title:SetWordWrap(false)
-    local detail = receipt:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    detail:SetPoint("BOTTOMLEFT", 8, 5)
-    detail:SetPoint("BOTTOMRIGHT", -8, 5)
-    detail:SetHeight(13)
-    detail:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
-    detail:SetTextColor(0.90, 0.83, 0.66)
-    detail:SetJustifyH("CENTER")
-    detail:SetWordWrap(false)
-    receipt:Hide()
-
     function controller:Clear()
-        for _, overlay in pairs(self.overlays) do overlay:Hide() end
+        for _, overlay in pairs(self.overlays) do
+            if overlay.SetCalloutActive then overlay:SetCalloutActive(false) end
+            overlay:Hide()
+        end
         self.activeIDs, self.startedAt, self.expiresAt = {}, nil, nil
+        self.interactionID = nil
         self.lastMessage, self.lastAuthor = nil, nil
-        receipt:Hide()
         driver:Hide()
+    end
+
+    function controller:IsAreaActive(id)
+        if not id then return false end
+        for _, activeID in ipairs(self.activeIDs) do
+            if activeID == id then return true end
+        end
+        return false
+    end
+
+    function controller:SetAreaInteraction(id, active, pressed)
+        if self.interactionID and (not active or self.interactionID ~= id) then
+            local previous = self.overlays[self.interactionID]
+            if previous and previous.SetHoverInteraction then previous:SetHoverInteraction(false) end
+            self.interactionID = nil
+        end
+        if not active or not self:IsAreaActive(id) then return false end
+        local overlay = self.overlays[id]
+        if not overlay or not overlay.SetHoverInteraction then return false end
+        if self.interactionID ~= id then
+            self.interactionID = id
+            overlay:SetHoverInteraction(true)
+        end
+        if overlay.SetInteractionPressed then overlay:SetInteractionPressed(pressed) end
+        return true
     end
 
     function controller:Receive(message, author, guid, fromBattleground)
@@ -359,7 +340,8 @@ function Incoming.Create(map, zones, nestedZones, createHighlight, actionRow)
                     overlay:SetZone(zone)
                     self.overlays[id] = overlay
                 end
-                overlay:SetAlpha(1)
+                if overlay.SetCalloutActive then overlay:SetCalloutActive(true) end
+                if overlay.SetCalloutPulseAlpha then overlay:SetCalloutPulseAlpha(1, 1) else overlay:SetAlpha(1) end
                 overlay:Show()
                 self.activeIDs[#self.activeIDs + 1] = id
             end
@@ -368,26 +350,23 @@ function Incoming.Create(map, zones, nestedZones, createHighlight, actionRow)
         self.startedAt = GetTime()
         self.expiresAt = self.startedAt + Incoming.DURATION
         self.lastMessage, self.lastAuthor = message, author
-        local count = #self.activeIDs
-        title:SetText("EFC report - " .. count .. (count == 1 and " possible area" or " possible areas"))
-        local sender = (author or "Player"):match("^[^%-]+")
-        -- Keep user-supplied chat markup out of the receipt's font string.
-        local plain = message:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|", "")
-        detail:SetText(ColorCallerName(sender, guid) .. ": " .. plain)
-        receipt:SetAlpha(1)
-        receipt:Show()
         driver:Show()
         return true
     end
 
-    driver:SetScript("OnUpdate", function()
+    driver:SetScript("OnUpdate", function(_, elapsed)
         local now = GetTime()
         if not controller.expiresAt or now >= controller.expiresAt then controller:Clear(); return end
         local age = now - controller.startedAt
-        local fade = math.min(1, (controller.expiresAt - now) / 2)
-        local alpha = (0.60 + 0.40 * math.cos(age * math.pi * 2 / 1.2)) * fade
-        for _, id in ipairs(controller.activeIDs) do controller.overlays[id]:SetAlpha(alpha) end
-        receipt:SetAlpha(fade)
+        local fade = math.min(1, (controller.expiresAt - now) / Incoming.FADE_DURATION)
+        local pulse = 0.60 + 0.40 * math.cos(age * math.pi * 2 / 1.2)
+        local alpha = pulse * fade
+        for _, id in ipairs(controller.activeIDs) do
+            local overlay = controller.overlays[id]
+            if overlay.SetCalloutPulseAlpha then overlay:SetCalloutPulseAlpha(alpha, fade) else overlay:SetAlpha(alpha) end
+            if overlay.UpdateCalloutAnimation then overlay:UpdateCalloutAnimation(age) end
+            if overlay.UpdateInteractionAnimation then overlay:UpdateInteractionAnimation(elapsed) end
+        end
     end)
     map:HookScript("OnHide", function() controller:Clear() end)
     local listener = CreateFrame("Frame")
