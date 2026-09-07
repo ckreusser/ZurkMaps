@@ -20,6 +20,16 @@ lua.execute((root / "Tests/av_test_spec.lua").read_text(encoding="utf-8-sig"))
 
 toc = (root / "ZurkMaps.toc").read_text(encoding="utf-8-sig")
 assert toc.index("ZurkMaps_AVTest.lua") < toc.index("ZurkMaps_AV.lua")
+assert "AdvanceAVTestAgents(elapsed)" in source
+assert "testMovementElapsed<0.05" not in source
+assert "AVMapRank.GetRankBadgeSize()" in source
+assert "local inv = 1 / compensationScale" in source
+assert "getAddonFrame=function() return frame end" in source
+assert "local endExtension = math.max(0, filigreeWidth - overlap)" in source
+assert "(map:GetWidth() or MAP_WIDTH) - (2 * endExtension)" in source
+assert "resizeState=ZurkMapsMapResize.Begin(frame, mapBorder)" in source
+assert "ZurkMapsMapResize.Update(frame, resizeState, MIN_SCALE, MAX_SCALE)" in source
+assert "resizeStartScale" not in source
 
 # Keep functions in their real shared lexical scope while replacing unrelated
 # map artwork, live roster APIs and chat/UI entry points with small mocks.

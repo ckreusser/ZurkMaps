@@ -20,9 +20,11 @@ DISPLAY_MAP_WIDTH = 334
 ALLIANCE_NUDGE_PIXELS = 5
 
 COLORS = {
-    "ALLY": ((40, 120, 255, 72), (95, 170, 255, 235)),
-    "HORDE": ((245, 65, 65, 72), (255, 105, 105, 235)),
-    "MID": ((45, 220, 100, 68), (90, 245, 135, 235)),
+    # Keep artwork neutral and apply faction RGB once in Lua. Baking color here
+    # caused WSG to multiply its red/blue by the runtime tint a second time.
+    "ALLY": ((255, 255, 255, 72), (255, 255, 255, 235)),
+    "HORDE": ((255, 255, 255, 72), (255, 255, 255, 235)),
+    "MID": ((255, 255, 255, 68), (255, 255, 255, 235)),
 }
 
 

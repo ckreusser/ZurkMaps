@@ -1,7 +1,7 @@
 """Rebuild helmet-only class textures from the original badges and audited masks."""
 from pathlib import Path
 import json
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parent
 COLORS = {
@@ -11,6 +11,20 @@ COLORS = {
     "MAGE": (64, 199, 235), "WARLOCK": (135, 135, 237),
     "DRUID": (255, 125, 10),
 }
+
+def build_shadows():
+    """Create a tight offset shadow from each rank's actual badge silhouette."""
+    shadow_root = ROOT.parent / "RankBadgeShadows"
+    shadow_root.mkdir(exist_ok=True)
+    for rank in (12, 13, 14):
+        original = Image.open(ROOT / f"Rank{rank}_Original.png").convert("RGBA")
+        alpha = original.getchannel("A").resize((64, 64), Image.Resampling.LANCZOS)
+        alpha = alpha.filter(ImageFilter.GaussianBlur(1.5))
+        shifted = Image.new("L", (64, 64), 0)
+        shifted.paste(alpha, (2, 3))
+        shadow = Image.new("RGBA", (64, 64), (0, 0, 0, 255))
+        shadow.putalpha(shifted)
+        shadow.save(shadow_root / f"Rank{rank}.tga", compression=None)
 
 def build():
     masks = json.loads((ROOT / "HelmetMasks.json").read_text())
@@ -31,7 +45,11 @@ def build():
                 for x in range(32):
                     if (x, y) not in mask:
                         assert output.getpixel((x, y)) == original.getpixel((x, y))
+            # Ship a 64px filtered source so subpixel movement does not expose
+            # the original 32px stair steps at small, user-scaled map sizes.
+            output = output.resize((64, 64), Image.Resampling.LANCZOS)
             output.save(ROOT / f"Rank{rank}_{token}.tga", compression=None)
+    build_shadows()
 
 if __name__ == "__main__":
     build()

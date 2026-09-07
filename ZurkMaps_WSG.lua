@@ -5,8 +5,8 @@ local addonName = ...
 local MAP_WIDTH = 330
 local MAP_HEIGHT = 440
 local ACTION_HEIGHT = 34
-local MOVE_HANDLE_HEIGHT = 18
-local MOVE_HANDLE_FONT_SIZE = 10
+local MOVE_HANDLE_HEIGHT = 22
+local MOVE_HANDLE_FONT_SIZE = 11
 local TITLE_PLAQUE_WIDTH = 184
 local MAP_ALPHA = 0.72
 local PANE_TEXT_R, PANE_TEXT_G, PANE_TEXT_B = 0.72, 0.66, 0.50
@@ -345,15 +345,15 @@ end
 
 function ZurkMapsWSGIncoming.GetVisualZoneColor(zone)
     local id = zone and zone.id or ""
-    if id:match("^ALLY_") then return 95 / 255, 170 / 255, 1 end
-    if id:match("^HORDE_") then return 1, 105 / 255, 105 / 255 end
+    if id:match("^ALLY_") then return 0.12, 0.36, 1.00 end
+    if id:match("^HORDE_") then return 1.00, 0.20, 0.16 end
     return 90 / 255, 245 / 255, 135 / 255
 end
 
 function ZurkMapsWSGIncoming.GetVisualZoneFillColor(zone)
     local id = zone and zone.id or ""
-    if id:match("^ALLY_") then return 40 / 255, 120 / 255, 1 end
-    if id:match("^HORDE_") then return 245 / 255, 65 / 255, 65 / 255 end
+    if id:match("^ALLY_") then return 0.12, 0.36, 1.00 end
+    if id:match("^HORDE_") then return 1.00, 0.20, 0.16 end
     return 45 / 255, 220 / 255, 100 / 255
 end
 
@@ -409,6 +409,8 @@ local function CreateWSGHighlight()
         self.shadowTexture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id)
         self.texture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id)
         self.calloutMask:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\CalloutMasks\\" .. zone.id)
+        local r, g, b = ZurkMapsWSGIncoming.GetVisualZoneColor(zone)
+        self.texture:SetVertexColor(r, g, b, 1)
         self.texture:Show()
     end
 
@@ -1958,7 +1960,13 @@ UpdateMoveHandleScale = function(addonScale)
     -- as one system so resizing cannot pull the border pieces apart.
     local compensationScale = math.min(addonScale, 1)
 
-    moveHandle:SetWidth(math.min(ROW_WIDTH, TITLE_PLAQUE_WIDTH / compensationScale))
+    local inv = 1 / compensationScale
+    local filigreeHeight = (MOVE_HANDLE_HEIGHT + moveHandle.filigreeExtraHeight) * inv
+    local filigreeWidth = filigreeHeight * moveHandle.filigreeAspect
+    local filigreeOverlap = moveHandle.filigreeOverlap * inv
+    local endExtension = math.max(0, filigreeWidth - filigreeOverlap)
+    local availableCenterWidth = math.max(1, (map:GetWidth() or MAP_WIDTH) - (2 * endExtension))
+    moveHandle:SetWidth(math.min(TITLE_PLAQUE_WIDTH * inv, availableCenterWidth))
     moveHandle:SetHeight(MOVE_HANDLE_HEIGHT / compensationScale)
     moveHandle.text:SetFont(
         "Fonts\\FRIZQT__.TTF",
@@ -2285,9 +2293,18 @@ end)
 -- Turtle callout button #1.
 -- It sits inside the upper-left corner of the map and scales with the addon.
 local TURTLE_BUTTON_SIZE = 45
-local TURTLE_MENU_WIDTH = 58
-local TURTLE_OPTION_HEIGHT = 25
-local TURTLE_MENU_PADDING = 5
+local TURTLE_MENU_STYLE = {
+    width = 82,
+    optionHeight = 25,
+    padding = 4,
+    headerHeight = 14,
+    headerGap = 4,
+    columnGap = 1,
+    rowGap = 1,
+    pressDepth = 2,
+    downSeconds = 0.045,
+    upSeconds = 0.065,
+}
 
 local turtleMenu
 local turtleMenuDismiss
@@ -2364,8 +2381,12 @@ turtleMenu = CreateFrame(
     BackdropTemplateMixin and "BackdropTemplate" or nil
 )
 turtleMenu:SetSize(
-    TURTLE_MENU_WIDTH,
-    (TURTLE_OPTION_HEIGHT * 5) + (TURTLE_MENU_PADDING * 2)
+    TURTLE_MENU_STYLE.width,
+    (TURTLE_MENU_STYLE.padding * 2)
+        + TURTLE_MENU_STYLE.headerHeight
+        + TURTLE_MENU_STYLE.headerGap
+        + (TURTLE_MENU_STYLE.optionHeight * 4)
+        + (TURTLE_MENU_STYLE.rowGap * 3)
 )
 turtleMenu:SetFrameStrata("DIALOG")
 turtleMenu:SetFrameLevel(91)
@@ -2386,51 +2407,164 @@ end
 
 turtleMenu:Hide()
 
+local turtleMenuOpaqueBackground = turtleMenu:CreateTexture(nil, "BACKGROUND", nil, -1)
+turtleMenuOpaqueBackground:SetTexture("Interface\\Buttons\\WHITE8X8")
+turtleMenuOpaqueBackground:SetPoint("TOPLEFT", turtleMenu, "TOPLEFT", 4, -4)
+turtleMenuOpaqueBackground:SetPoint("BOTTOMRIGHT", turtleMenu, "BOTTOMRIGHT", -4, 4)
+turtleMenuOpaqueBackground:SetVertexColor(0.018, 0.014, 0.010, 1)
+
+local turtleMenuHeadingBackground = turtleMenu:CreateTexture(nil, "BACKGROUND", nil, 1)
+turtleMenuHeadingBackground:SetTexture("Interface\\Buttons\\WHITE8X8")
+turtleMenuHeadingBackground:SetPoint("TOPLEFT", turtleMenu, "TOPLEFT", 5, -5)
+turtleMenuHeadingBackground:SetPoint("TOPRIGHT", turtleMenu, "TOPRIGHT", -5, -5)
+turtleMenuHeadingBackground:SetHeight(TURTLE_MENU_STYLE.headerHeight)
+turtleMenuHeadingBackground:SetVertexColor(0.07, 0.045, 0.018, 1)
+
+local turtleMenuHeadingDivider = turtleMenu:CreateTexture(nil, "BORDER")
+turtleMenuHeadingDivider:SetTexture("Interface\\Buttons\\WHITE8X8")
+turtleMenuHeadingDivider:SetPoint("TOPLEFT", turtleMenuHeadingBackground, "BOTTOMLEFT", 0, 0)
+turtleMenuHeadingDivider:SetPoint("TOPRIGHT", turtleMenuHeadingBackground, "BOTTOMRIGHT", 0, 0)
+turtleMenuHeadingDivider:SetHeight(1)
+turtleMenuHeadingDivider:SetVertexColor(0.62, 0.48, 0.24, 0.28)
+
+local turtleMenuHeading = turtleMenu:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+turtleMenuHeading:SetPoint(
+    "TOPLEFT",
+    turtleMenu,
+    "TOPLEFT",
+    TURTLE_MENU_STYLE.padding,
+    -TURTLE_MENU_STYLE.padding
+)
+turtleMenuHeading:SetPoint(
+    "TOPRIGHT",
+    turtleMenu,
+    "TOPRIGHT",
+    -TURTLE_MENU_STYLE.padding,
+    -TURTLE_MENU_STYLE.padding
+)
+turtleMenuHeading:SetHeight(TURTLE_MENU_STYLE.headerHeight)
+turtleMenuHeading:SetText("WITH EFC")
+turtleMenuHeading:SetTextColor(1, 0.74, 0.18, 1)
+turtleMenuHeading:SetJustifyH("CENTER")
+if turtleMenuHeading.SetWordWrap then turtleMenuHeading:SetWordWrap(false) end
+if turtleMenuHeading.SetNonSpaceWrap then turtleMenuHeading:SetNonSpaceWrap(false) end
+if turtleMenuHeading.SetMaxLines then turtleMenuHeading:SetMaxLines(1) end
+
 local function AnchorTurtleMenuToIcon()
     turtleMenu:SetScale(frame:GetScale())
     turtleMenu:ClearAllPoints()
     turtleMenu:SetPoint("TOPLEFT", turtleButton, "BOTTOMLEFT", 0, -2)
 end
 
-for i = 1, 5 do
+for i = 1, 8 do
     local optionText = tostring(i) .. "+"
     local option = CreateFrame("Button", nil, turtleMenu)
-    option:SetHeight(TURTLE_OPTION_HEIGHT)
-    option:SetPoint(
-        "TOPLEFT",
-        turtleMenu,
-        "TOPLEFT",
-        TURTLE_MENU_PADDING,
-        -TURTLE_MENU_PADDING - ((i - 1) * TURTLE_OPTION_HEIGHT)
-    )
-    option:SetPoint(
-        "TOPRIGHT",
-        turtleMenu,
-        "TOPRIGHT",
-        -TURTLE_MENU_PADDING,
-        -TURTLE_MENU_PADDING - ((i - 1) * TURTLE_OPTION_HEIGHT)
-    )
+    local row = math.floor((i - 1) / 2)
+    local column = (i - 1) % 2
+    local availableWidth = TURTLE_MENU_STYLE.width - (TURTLE_MENU_STYLE.padding * 2)
+    local buttonWidth = (availableWidth - TURTLE_MENU_STYLE.columnGap) / 2
+    local xOffset = TURTLE_MENU_STYLE.padding
+        + (column * (buttonWidth + TURTLE_MENU_STYLE.columnGap))
+    local yOffset = TURTLE_MENU_STYLE.padding
+        + TURTLE_MENU_STYLE.headerHeight
+        + TURTLE_MENU_STYLE.headerGap
+        + (row * (TURTLE_MENU_STYLE.optionHeight + TURTLE_MENU_STYLE.rowGap))
+    option:SetPoint("TOPLEFT", turtleMenu, "TOPLEFT", xOffset, -yOffset)
+    option:SetSize(buttonWidth, TURTLE_MENU_STYLE.optionHeight)
+    option:SetFrameLevel(turtleMenu:GetFrameLevel() + 1)
 
-    local optionBG = option:CreateTexture(nil, "BACKGROUND")
-    optionBG:SetAllPoints()
-    optionBG:SetColorTexture(0.02, 0.02, 0.02, 0.72)
+    option.shadow = option:CreateTexture(nil, "BACKGROUND")
+    option.shadow:SetTexture("Interface\\Buttons\\WHITE8X8")
+    option.shadow:SetPoint("TOPLEFT", option, "TOPLEFT", 1, -2)
+    option.shadow:SetPoint("BOTTOMRIGHT", option, "BOTTOMRIGHT", -1, 0)
+    option.shadow:SetVertexColor(0, 0, 0, 0.82)
 
-    local optionHighlight = option:CreateTexture(nil, "HIGHLIGHT")
-    optionHighlight:SetAllPoints()
-    optionHighlight:SetColorTexture(0.85, 0.62, 0.08, 0.55)
+    option.face = CreateFrame("Button", nil, option, "UIPanelButtonTemplate")
+    option.face:SetFrameLevel(option:GetFrameLevel() + 1)
+    option.face:EnableMouse(false)
+    option.face:SetText("")
+    option.label = option.face:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    option.label:SetPoint("CENTER", option.face, "CENTER", 0, 0)
+    option.label:SetTextColor(1, 0.84, 0.30, 1)
+    option.label:SetText(optionText)
+    local faceHighlight = option.face:GetHighlightTexture()
+    if faceHighlight then
+        faceHighlight:SetBlendMode("ADD")
+        faceHighlight:SetAlpha(0.72)
+    end
 
-    local optionLabel = option:CreateFontString(nil, "OVERLAY")
-    optionLabel:SetPoint("CENTER")
-    optionLabel:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
-    optionLabel:SetTextColor(1, 0.88, 0.48, 1)
-    optionLabel:SetText(optionText)
+    function option:SetPressDepth(depth)
+        depth = math.max(0, math.min(TURTLE_MENU_STYLE.pressDepth, tonumber(depth) or 0))
+        self.pressDepth = depth
+        self.face:ClearAllPoints()
+        self.face:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -depth)
+        self.face:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 0, 2 - depth)
+        self.face:SetButtonState(depth >= (TURTLE_MENU_STYLE.pressDepth * 0.42) and "PUSHED" or "NORMAL")
+        self.shadow:SetAlpha(0.82 * (1 - (0.78 * (depth / TURTLE_MENU_STYLE.pressDepth))))
+    end
+
+    function option:AnimatePressTo(target, duration, onFinished)
+        self.pressStart = self.pressDepth or 0
+        self.pressTarget = target
+        self.pressDuration = math.max(0.001, duration or TURTLE_MENU_STYLE.upSeconds)
+        self.pressElapsed = 0
+        self.pressFinished = onFinished
+    end
+
+    option:SetScript("OnUpdate", function(self, elapsed)
+        if self.pressElapsed == nil then return end
+        self.pressElapsed = self.pressElapsed + math.max(0, tonumber(elapsed) or 0)
+        local progress = math.min(1, self.pressElapsed / self.pressDuration)
+        local eased = 1 - ((1 - progress) ^ 3)
+        self:SetPressDepth(self.pressStart + ((self.pressTarget - self.pressStart) * eased))
+        if progress >= 1 then
+            self.pressElapsed = nil
+            local finished = self.pressFinished
+            self.pressFinished = nil
+            if finished then finished() end
+        end
+    end)
+
+    option:SetScript("OnEnter", function(self)
+        self.face:LockHighlight()
+    end)
+
+    option:SetScript("OnLeave", function(self)
+        self.face:UnlockHighlight()
+        if self.pressElapsed ~= nil and self.pressTarget == TURTLE_MENU_STYLE.pressDepth then
+            self:AnimatePressTo(0, TURTLE_MENU_STYLE.upSeconds)
+        end
+    end)
+
+    option:SetScript("OnMouseDown", function(self)
+        self:AnimatePressTo(TURTLE_MENU_STYLE.pressDepth, TURTLE_MENU_STYLE.downSeconds)
+    end)
+
+    option:SetScript("OnMouseUp", function(self)
+        self:AnimatePressTo(0, TURTLE_MENU_STYLE.upSeconds)
+    end)
+
+    option:SetScript("OnHide", function(self)
+        self.pressElapsed = nil
+        self.pressFinished = nil
+        self.reportPending = nil
+        self:SetPressDepth(0)
+        self.face:UnlockHighlight()
+    end)
 
     option.calloutText = optionText
     option:RegisterForClicks("LeftButtonUp")
     option:SetScript("OnClick", function(self)
-        CloseTurtleMenu()
-        Report("They are turtling. " .. self.calloutText .. " visible in their Flag Room")
+        if self.reportPending then return end
+        local message = "They are turtling. " .. self.calloutText .. " visible with the EFC"
+        -- Keep the protected chat call inside the actual hardware event.
+        self.reportPending = true
+        Report(message)
+        self:AnimatePressTo(0, TURTLE_MENU_STYLE.upSeconds, function()
+            CloseTurtleMenu()
+        end)
     end)
+    option:SetPressDepth(0)
 end
 
 turtleButton:SetScript("OnEnter", function(self)
@@ -2439,7 +2573,7 @@ turtleButton:SetScript("OnEnter", function(self)
 
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetText("Turtle Callout")
-    GameTooltip:AddLine("Choose how many defenders are visible in their Flag Room.", 0.8, 0.8, 0.8, true)
+    GameTooltip:AddLine("Choose how many defenders are visible with the EFC.", 0.8, 0.8, 0.8, true)
     GameTooltip:Show()
 end)
 
@@ -2594,6 +2728,7 @@ ZurkMapsWSGRank = ZurkMapsPlayerBlips.CreateRankController({
     iconScale = 0.924,
     baseDotSize = FRIENDLY_PLAYER_DOT_SIZE,
     getFriendlyFrame = function() return friendlyPlayersFrame end,
+    getAddonFrame = function() return frame end,
     isAvailable = function() return friendlyPlayersFrameAvailable end,
     getMapFrame = function() return map end,
     getUiMapID = GetWSGUiMapID,
@@ -2907,7 +3042,7 @@ UpdateWSGTestBlips = function()
         elseif assignedIcon and ZurkMapsPlayerIcons.ApplyAssignedIcon then
             ZurkMapsPlayerIcons.ApplyAssignedIcon(blip, assignedIcon, dotSize * (ZurkMapsPlayerIcons.manualIconScale or 0.84))
         elseif agent.pvpRankNumber and agent.pvpRankNumber >= ZurkMapsWSGRank.min and agent.pvpRankNumber <= ZurkMapsWSGRank.max then
-            ZurkMapsPlayerBlips.ApplyRankBadge(blip, agent.pvpRankNumber, dotSize * ZurkMapsWSGRank.iconScale, agent.classToken)
+            ZurkMapsPlayerBlips.ApplyRankBadge(blip, agent.pvpRankNumber, ZurkMapsWSGRank.GetRankBadgeSize(), agent.classToken)
         else
             ZurkMapsPlayerBlips.ApplyGoldBlip(blip, dotSize, ZurkMapsWSGTestSim.gold[1], ZurkMapsWSGTestSim.gold[2], ZurkMapsWSGTestSim.gold[3])
         end
@@ -2923,15 +3058,10 @@ UpdateWSGTestBlips = function()
 end
 ShowWSGTestBlips = function() UpdateWSGTestBlips() end
 HideWSGTestBlips = function() for _, blip in ipairs(ZurkMapsWSGTestSim.blips) do blip:Hide() end end
-ZurkMapsWSGTestSim.movementElapsed = 0
 ZurkMapsWSGTestSim.movementFrame = CreateFrame("Frame", nil, frame)
 ZurkMapsWSGTestSim.movementFrame:SetScript("OnUpdate", function(_, elapsed)
     if not wsgTestMode then return end
-    ZurkMapsWSGTestSim.movementElapsed = ZurkMapsWSGTestSim.movementElapsed + elapsed
-    if ZurkMapsWSGTestSim.movementElapsed < 0.05 then return end
-    local step = ZurkMapsWSGTestSim.movementElapsed
-    ZurkMapsWSGTestSim.movementElapsed = 0
-    ZurkMapsWSGTestSim.Advance(step)
+    ZurkMapsWSGTestSim.Advance(elapsed)
     UpdateWSGTestBlips()
     UpdateFriendlyFlagMarker()
 end)

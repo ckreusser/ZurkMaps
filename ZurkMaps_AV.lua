@@ -18,7 +18,7 @@ if ZurksAVCalloutMapDB.showHonorBar == nil then ZurksAVCalloutMapDB.showHonorBar
 local manualVisibility = nil
 local isMoving = false
 local resizing = false
-local resizeStartX, resizeStartY, resizeStartScale = 0, 0, 1
+local resizeState = nil
 
 -- Positions are fitted from Blizzard's AV objective-map artwork onto AVMap.tga.
 -- x/y are percentages of the custom portrait texture after the current AV map crop.
@@ -455,15 +455,18 @@ end
 
 
 local function UpdateHeaderGeometry(addonScale)
-    -- Let the title plaque scale with the map. The previous inverse compensation
-    -- kept the plaque physically full-size and made it overhang the map at small scales.
-    local inv = 1
-    moveHandle:SetWidth(TITLE_PLAQUE_WIDTH * inv)
+    -- Match AB/WSG: keep the title readable below 100% while allowing it to grow
+    -- normally with maps enlarged beyond their default size.
+    local compensationScale = math.min(math.max(tonumber(addonScale) or 1, 0.01), 1)
+    local inv = 1 / compensationScale
+    local filigreeHeight = (MOVE_HANDLE_HEIGHT + moveHandle.filigreeExtraHeight) * inv
+    local filigreeWidth = filigreeHeight * moveHandle.filigreeAspect
+    local overlap = moveHandle.filigreeOverlap * inv
+    local endExtension = math.max(0, filigreeWidth - overlap)
+    local availableCenterWidth = math.max(1, (map:GetWidth() or MAP_WIDTH) - (2 * endExtension))
+    moveHandle:SetWidth(math.min(TITLE_PLAQUE_WIDTH * inv, availableCenterWidth))
     moveHandle:SetHeight(MOVE_HANDLE_HEIGHT * inv)
     moveHandle.text:SetFont("Fonts\\FRIZQT__.TTF", MOVE_HANDLE_FONT_SIZE * inv, "")
-    local filigreeHeight = (MOVE_HANDLE_HEIGHT + 2) * inv
-    local filigreeWidth = filigreeHeight * moveHandle.filigreeAspect
-    local overlap = 4 * inv
     moveHandle.leftTrim:ClearAllPoints(); moveHandle.leftTrim:SetPoint("RIGHT", moveHandle.border, "LEFT", overlap, 0); moveHandle.leftTrim:SetSize(filigreeWidth, filigreeHeight)
     moveHandle.rightTrim:ClearAllPoints(); moveHandle.rightTrim:SetPoint("LEFT", moveHandle.border, "RIGHT", -overlap, 0); moveHandle.rightTrim:SetSize(filigreeWidth, filigreeHeight)
     moveHandle.bg:ClearAllPoints(); moveHandle.bg:SetPoint("TOPLEFT", moveHandle.border, "TOPLEFT", 0, -1*inv); moveHandle.bg:SetPoint("BOTTOMRIGHT", moveHandle.border, "BOTTOMRIGHT", 0, 1*inv)
@@ -511,9 +514,6 @@ local function RestoreLayout()
     local p = ZurksAVCalloutMapDB.point
     if p and p.point and p.relativePoint and p.x and p.y then frame:ClearAllPoints(); frame:SetPoint(p.point, UIParent, p.relativePoint, p.x, p.y) end
 end
-local function GetCursorUIPosition()
-    local x, y = GetCursorPosition(); local scale = UIParent:GetEffectiveScale(); return x/scale, y/scale
-end
 local function StartMove()
     if InCombatLockdown and InCombatLockdown() then return end
     isMoving = true; GameTooltip:Hide(); frame:StartMoving()
@@ -551,9 +551,11 @@ map:SetScript("OnDragStop", StopMove)
 
 local function BeginResize()
     if InCombatLockdown and InCombatLockdown() then return end
-    resizing=true; resizeStartX,resizeStartY=GetCursorUIPosition(); resizeStartScale=frame:GetScale(); GameTooltip:Hide()
+    resizing=true; resizeState=ZurkMapsMapResize.Begin(frame, mapBorder); GameTooltip:Hide()
 end
-local function EndResize() if resizing then resizing=false; SaveLayout() end end
+local function EndResize()
+    if resizing then resizing=false; resizeState=nil; SaveLayout() end
+end
 local resizeHandle=CreateFrame("Button", nil, map)
 resizeHandle:SetSize(22,22); resizeHandle:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", -1,1); resizeHandle:SetFrameLevel(mapBorder:GetFrameLevel()+2); resizeHandle:RegisterForDrag("LeftButton")
 resizeHandle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up"); resizeHandle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight"); resizeHandle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
@@ -576,9 +578,8 @@ resizeHandle:SetScript("OnUpdate", function(self, elapsed)
     if gripTarget>self._gripAlpha then self._gripAlpha=math.min(1,self._gripAlpha+((elapsed or 0)/0.2)) elseif gripTarget<self._gripAlpha then self._gripAlpha=math.max(0,self._gripAlpha-((elapsed or 0)/0.1)) end
     self:GetNormalTexture():SetAlpha(self._gripAlpha); self:GetHighlightTexture():SetAlpha(self._gripAlpha); self:GetPushedTexture():SetAlpha(self._gripAlpha)
     if not resizing then return end
-    local x,y=GetCursorUIPosition(); local dx=x-resizeStartX; local dy=resizeStartY-y
-    local sx=resizeStartScale+(dx/MAP_WIDTH); local sy=resizeStartScale+(dy/MAP_HEIGHT); local newScale=(sx+sy)/2
-    newScale=math.max(MIN_SCALE, math.min(MAX_SCALE,newScale)); frame:SetScale(newScale); UpdateHeaderGeometry(newScale); UpdateObjectiveScale(); if ZurkMapsAVLieutenants and ZurkMapsAVLieutenants.RefreshScale then ZurkMapsAVLieutenants.RefreshScale() end
+    local newScale=ZurkMapsMapResize.Update(frame, resizeState, MIN_SCALE, MAX_SCALE)
+    UpdateHeaderGeometry(newScale); UpdateObjectiveScale(); if ZurkMapsAVLieutenants and ZurkMapsAVLieutenants.RefreshScale then ZurkMapsAVLieutenants.RefreshScale() end
 end)
 
 
@@ -755,6 +756,7 @@ end
 local AVMapRank = ZurkMapsPlayerBlips and ZurkMapsPlayerBlips.CreateRankController and ZurkMapsPlayerBlips.CreateRankController({
     min=12, max=14, iconScale=0.924, baseDotSize=AV_FRIENDLY_PLAYER_DOT_SIZE,
     getFriendlyFrame=function() return friendlyPlayersFrame end,
+    getAddonFrame=function() return frame end,
     isAvailable=function() return friendlyPlayersFrameAvailable end,
     getMapFrame=function() return map end,
     getUiMapID=GetAVUiMapID,
@@ -958,7 +960,7 @@ local function UpdateAVTestBlips()
             end
         elseif agent.pvpRankNumber then
             ZurkMapsPlayerBlips.ApplyRankBadge(blip,agent.pvpRankNumber,
-                dotSize * (AVMapRank and AVMapRank.iconScale or .924),agent.classToken)
+                AVMapRank.GetRankBadgeSize(),agent.classToken)
         else
             ZurkMapsPlayerBlips.ApplyGoldBlip(blip,dotSize,AV_TEST_GOLD_R,AV_TEST_GOLD_G,AV_TEST_GOLD_B)
         end
@@ -976,16 +978,11 @@ local function HideAVTestBlips()
     for _,blip in ipairs(avTestBlips) do blip:Hide() end
 end
 
-local testMovementElapsed=0
 -- A parentless driver keeps the rehearsal running while the user closes the map.
 local testMovementFrame=CreateFrame("Frame")
 testMovementFrame:SetScript("OnUpdate",function(_,elapsed)
     if not avTestMode then return end
-    testMovementElapsed=testMovementElapsed+elapsed
-    if testMovementElapsed<0.05 then return end
-    local step=testMovementElapsed
-    testMovementElapsed=0
-    AdvanceAVTestAgents(step)
+    AdvanceAVTestAgents(elapsed)
     if frame:IsShown() then UpdateAVTestBlips() end
 end)
 

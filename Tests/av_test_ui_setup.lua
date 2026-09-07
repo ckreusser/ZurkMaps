@@ -12,7 +12,7 @@ local friendlyPlayersClipFrame = CreateFrame(nil,nil,frame)
 local friendlyPlayersFrame = CreateFrame(nil,nil,frame)
 local MAP_WIDTH,MAP_HEIGHT,AV_FRIENDLY_PLAYER_DOT_SIZE=276,512,10
 local AV_TEST_GOLD_R,AV_TEST_GOLD_G,AV_TEST_GOLD_B=1,.82,.18
-local AVMapRank={iconScale=.924}
+local AVMapRank={iconScale=.924,GetRankBadgeSize=function() return 12.5*.924/.65 end}
 local manualVisibility, testPreviousManualVisibility, avTestSimulation
 local avTestMode=false
 local ResetObjectivesToInitial, RefreshObjectives, ApplyAVTestObjective

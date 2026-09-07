@@ -7,6 +7,9 @@ local function Equal(actual, expected, label)
     assert(actual == expected, label .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
     checks = checks + 1
 end
+local downscaledFrame = {GetScale = function() return 0.55 end}
+Equal(math.abs((Blips.GetRankBadgeSize(12.5, 0.924, downscaledFrame) * 0.55) - 11.55) < 0.0001,
+    true, "downscaled map preserves readable helmet screen size")
 function UnitExists(unit) return players[unit] ~= nil end
 function UnitGUID(unit) return players[unit] and players[unit].guid end
 function UnitIsUnit(a, b) return UnitGUID(a) ~= nil and UnitGUID(a) == UnitGUID(b) end
@@ -47,11 +50,14 @@ function Frame:SetTexture(path) self.texturePath = path end
 function Frame:SetTexCoord(...) self.texCoord = {...} end
 function Frame:SetVertexColor(...) self.color = {...} end
 function Frame:SetBlendMode(blend) self.blend = blend end
+function Frame:SetFilterMode(filter) self.filterMode = filter end
+function Frame:SetSnapToPixelGrid(enabled) self.snapToPixelGrid = enabled end
+function Frame:SetTexelSnappingBias(bias) self.texelSnappingBias = bias end
 function Frame:SetUiMapID(id) self.mapID = id end
 function Frame:ClearUnits() self.units = {} end
 function Frame:AddUnit(unit, texture, w, h, r, g, b, alpha, sublevel, rotation)
     if UnitGUID(unit) then
-        self.units[UnitGUID(unit)] = {unit = unit, texture = texture, r = r, g = g, b = b, alpha = alpha, rotation = rotation}
+        self.units[UnitGUID(unit)] = {unit = unit, texture = texture, width = w, height = h, r = r, g = g, b = b, alpha = alpha, rotation = rotation}
     end
 end
 function Frame:FinalizeUnits() end
@@ -132,6 +138,21 @@ local function Setup(native)
     Refresh()
     NoExtraSelf()
     Equal(Overlay("raid2"), "Interface\\AddOns\\ZurkMaps\\Media\\RankBadges\\Rank13_DRUID", "orange R13 helmet")
+    local helmetSize = native and controller.nativeSpecialFrame.units[UnitGUID("raid2")].width
+        or controller.blips.raid2.width
+    Equal(math.abs(helmetSize - 11.55) < 0.0001, true, "helmet uses shared AB-sized footprint")
+    if native then
+        local shadow = controller.nativeShadowFrame.units[UnitGUID("raid2")]
+        Equal(shadow.texture, "Interface\\AddOns\\ZurkMaps\\Media\\RankBadgeShadows\\Rank13", "native helmet uses rank-shaped shadow")
+        Equal(math.abs(shadow.width - 13.55) < 0.0001, true, "native shadow stays tight")
+    else
+        Equal(controller.blips.raid2.shadow:IsShown(), true, "fallback helmet shows tight shadow")
+        Equal(controller.blips.raid2.shadow.texturePath, "Interface\\AddOns\\ZurkMaps\\Media\\RankBadgeShadows\\Rank13", "fallback helmet uses rank-shaped shadow")
+        Equal(controller.blips.raid2.shadow.blend, "BLEND", "fallback shadow uses normal blend")
+        Equal(controller.blips.raid2.texture.snapToPixelGrid, false, "moving helmet disables pixel-grid shimmer")
+        Equal(controller.blips.raid2.texture.texelSnappingBias, 0, "moving helmet uses neutral texel bias")
+        Equal(controller.blips.raid2.texture.filterMode, "LINEAR", "moving helmet uses linear filtering")
+    end
     Equal(Overlay("raid3"), nil, "carrier has no replacement blip")
     Equal(friendly.units[carrierGUID].alpha, 0, "native carrier dot hidden")
     Equal(friendly.units[UnitGUID("raid2")].alpha, 0, "native dot hidden under helmet")

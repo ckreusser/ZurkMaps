@@ -4,6 +4,29 @@ All notable changes to Zurk Maps will be documented in this file.
 
 ## Unreleased
 
+## Zurk Maps 1.3.0-r20
+
+### Added
+
+- Added animated, faction-aware area reporting to AB base highlights. Node tooltips and compact panel headings now distinguish enemies **Incoming** at friendly-controlled nodes from enemies **Visible** at opposite-controlled nodes.
+
+### Changed
+
+- Rebuilt all AB base, road, bridge, intersection, and water highlights from supersampled map-fitted geometry. Road overlays now follow the underlying paths without overlapping one another, including the split road east of Gold Mine; all roads share one spring-green treatment, the north bridge and intersection share one color, and both water areas share one water color.
+- Reworked every numbered area-report menu into the same compact two-column, four-row panel with in-game button artwork, full-face hover highlights, short press/release animation, tighter spacing, smaller special-label text, and a subtle header divider. AB panels use **Incoming** or **Visible**, and the WSG turtle panel uses **With EFC**.
+- Changed the WSG turtle report to “They are turtling. N+ visible with the EFC” and expanded its choices through `8+`.
+- Matched WSG faction areas to AB's exact Horde red and Alliance blue in both static hover and animated callout rendering.
+- Normalized moving rank-helmet blips across WSG, AB, and AV. Helmets now retain an AB-sized readable footprint on scaled-down maps, use 64-pixel filtered artwork with subpixel-safe movement, and have a prominent rank-shaped drop shadow.
+- Normalized the WSG and AV title plaques to AB's readable scaled size while keeping the complete plaque and decorative endcaps within the map width.
+
+### Fixed
+
+- Prevented AB areas from flickering when the active area is clicked again.
+- Kept chat reports inside the original hardware click event, preventing `ADDON_ACTION_BLOCKED` errors from delayed protected calls.
+- Fixed clipped area-menu headings, inconsistent `Safe` hover text sizing, uneven button gaps, partial hover fills, and oversized divider styling.
+- Made AV resizing preserve the visible top-left corner, matching WSG and AB.
+- Removed missing, doubled, and artifacted AB road sections and kept forked branches as one seam-free highlight.
+
 ## Zurk Maps 1.3.0-r19
 
 ### Added

@@ -660,9 +660,13 @@ function PlayerIcons.ApplyAssignedIcon(blip, iconID, size)
     end
 
     if blip.shadow then
+        blip.shadow:ClearAllPoints()
+        blip.shadow:SetPoint("TOPLEFT", blip, "TOPLEFT", -1, 1)
+        blip.shadow:SetPoint("BOTTOMRIGHT", blip, "BOTTOMRIGHT", 1, -1)
         blip.shadow:SetTexture(texture)
         blip.shadow:SetTexCoord(0, 1, 0, 1)
         blip.shadow:SetVertexColor(0, 0, 0, 0.72)
+        if blip.shadow.SetBlendMode then blip.shadow:SetBlendMode("BLEND") end
         blip.shadow:Show()
     end
 

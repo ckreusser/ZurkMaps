@@ -13,6 +13,7 @@ ZurksABCalloutMapDB = ZurksABCalloutMapDB or {}
 if ZurksABCalloutMapDB.showHonorBar == nil then ZurksABCalloutMapDB.showHonorBar = true end
 
 local hoveredZone = nil
+local hoveredAreaOverlay = nil
 local isMoving = false
 local resizing = false
 local hoverAccumulator = 0
@@ -170,9 +171,9 @@ local ZONES = {
         hitRadius = 2.60,
         hitPaths = {
             {
-                {24.20, 36.00}, {24.10, 39.00}, {24.70, 42.00}, {25.80, 44.50},
-                {27.00, 46.80}, {27.20, 48.80}, {26.50, 50.80}, {25.30, 53.00},
-                {24.10, 55.20}, {23.40, 56.50},
+                {24.40, 37.55}, {24.45, 39.45}, {25.20, 41.55}, {26.45, 43.75},
+                {27.55, 45.95}, {28.05, 47.75}, {27.55, 49.20}, {26.40, 50.75},
+                {25.20, 52.35}, {24.25, 54.05}, {24.10, 56.35}, {24.60, 57.85},
             },
         },
     },
@@ -199,9 +200,9 @@ local ZONES = {
         hitRadius = 2.60,
         hitPaths = {
             {
-                {55.50, 32.00}, {57.00, 33.20}, {58.50, 35.00}, {60.00, 37.20},
-                {61.50, 39.80}, {63.00, 42.50}, {64.50, 45.30}, {66.00, 48.20},
-                {67.50, 50.70}, {69.00, 52.90}, {70.80, 54.30},
+                {53.20, 31.55}, {55.30, 32.75}, {57.45, 34.55}, {59.45, 37.10},
+                {61.55, 39.90}, {63.90, 42.35}, {65.75, 45.05}, {66.45, 47.55},
+                {66.80, 49.55}, {68.45, 52.15},
             },
         },
     },
@@ -213,11 +214,16 @@ local ZONES = {
         hitRadius = 2.60,
         hitPaths = {
             {
-                {72.10, 49.50}, {72.70, 51.70}, {73.40, 54.00}, {74.10, 56.20},
-                {74.80, 58.50}, {75.50, 60.50}, {76.30, 62.00},
+                {66.80, 46.35}, {67.10, 47.90}, {67.75, 49.65}, {68.70, 51.75},
+                {70.25, 53.55}, {72.55, 55.35}, {73.30, 55.85},
             },
             {
-                {70.50, 53.40}, {71.60, 54.00}, {72.70, 54.70}, {73.60, 55.40},
+                {71.55, 44.55}, {71.55, 46.65}, {71.70, 48.80}, {72.10, 50.85},
+                {72.70, 53.10}, {73.30, 55.85},
+            },
+            {
+                {73.25, 55.70}, {74.55, 57.45}, {75.85, 59.35}, {76.55, 60.65},
+                {76.55, 61.30},
             },
         },
     },
@@ -229,9 +235,9 @@ local ZONES = {
         hitRadius = 2.60,
         hitPaths = {
             {
-                {27.91, 50.16}, {29.74, 52.23}, {31.90, 55.26}, {33.65, 57.02},
-                {37.24, 59.97}, {38.76, 60.85}, {40.03, 62.04}, {44.74, 65.47},
-                {45.93, 66.03}, {46.17, 66.43},
+                {27.80, 50.05}, {29.60, 52.15}, {31.75, 55.10}, {33.55, 56.95},
+                {37.10, 59.85}, {38.70, 60.75}, {40.10, 62.00}, {44.55, 65.30},
+                {46.05, 66.25},
             },
         },
     },
@@ -285,6 +291,11 @@ local BASE_NODES = {
 local BASE_NODE_BY_ID = {}
 for _, baseNode in ipairs(BASE_NODES) do
     BASE_NODE_BY_ID[baseNode.id] = baseNode
+end
+
+local ZONE_BY_ID = {}
+for _, zone in ipairs(ZONES) do
+    ZONE_BY_ID[zone.id] = zone
 end
 
 local function Report(message)
@@ -476,6 +487,16 @@ local function GetEnemyFactionToken()
     return "enemy"
 end
 
+local function GetEnemyFactionDisplayName()
+    local faction = UnitFactionGroup and UnitFactionGroup("player") or nil
+    if faction == "Alliance" then
+        return "Horde"
+    elseif faction == "Horde" then
+        return "Alliance"
+    end
+    return "Enemy"
+end
+
 local function IsBaseHeldOrAssaultedByPlayerFaction(zone)
     if not zone or not zone.isBase then
         return false
@@ -519,6 +540,11 @@ local function IsBaseHeldOrAssaultedByPlayerFaction(zone)
     end
 
     return offset == 3 or offset == 4
+end
+
+local function GetBaseReportDescriptor(zone)
+    local reportType = IsBaseHeldOrAssaultedByPlayerFaction(zone) and "incoming" or "visible"
+    return GetEnemyFactionDisplayName() .. " " .. reportType
 end
 
 local function FormatZoneCallout(zone, dropdownSelection)
@@ -645,10 +671,472 @@ frame.SetABHonorBarUnlocked = function(flag)
     if ZurkMapsHonorWidget and ZurkMapsHonorWidget.SetGlobalUnlocked then ZurkMapsHonorWidget.SetGlobalUnlocked(flag) end
 end
 
--- Same one-texture-at-a-time hotspot highlighting approach as the WSG map.
-local highlightTexture = map:CreateTexture(nil, "ARTWORK")
-highlightTexture:SetAllPoints()
-highlightTexture:Hide()
+-- AB hover and contested areas use the same renderer as the finished WSG
+-- callout regions: antialiased masks, one shared stripe direction, uniformly
+-- rotating border dashes, and a map-anchored button shadow.
+local AB_AREA_VISUAL = {
+    stripeTexture = "Interface\\AddOns\\ZurkMaps\\Media\\CalloutStripes",
+    stripeLong = 1024,
+    stripeShort = 512,
+    stripeTile = 16,
+    stripeCycle = 3.2,
+    stripeAlpha = 0.34,
+    borderDashCycle = 1.8,
+    borderAlpha = 0.86,
+    shadowOffset = 2.15,
+    shadowAlpha = 0.48,
+    hoverOffset = 0,
+    pressedOffset = 1.35,
+    releaseDuration = 0.09,
+    roadHalfWidth = 1.20,
+    allianceColor = { 0.12, 0.36, 1.00 },
+    hordeColor = { 1.00, 0.20, 0.16 },
+}
+
+local function SmoothABContour(points, iterations)
+    local result = {}
+    for _, point in ipairs(points or {}) do
+        result[#result + 1] = { point[1], point[2] }
+    end
+    for _ = 1, (iterations or 0) do
+        local smoothed = {}
+        for index, point in ipairs(result) do
+            local nextPoint = result[(index % #result) + 1]
+            smoothed[#smoothed + 1] = {
+                (point[1] * 0.75) + (nextPoint[1] * 0.25),
+                (point[2] * 0.75) + (nextPoint[2] * 0.25),
+            }
+            smoothed[#smoothed + 1] = {
+                (point[1] * 0.25) + (nextPoint[1] * 0.75),
+                (point[2] * 0.25) + (nextPoint[2] * 0.75),
+            }
+        end
+        result = smoothed
+    end
+    return result
+end
+
+local function SmoothABOpenPath(points, iterations)
+    local result = {}
+    for _, point in ipairs(points or {}) do result[#result + 1] = { point[1], point[2] } end
+    for _ = 1, (iterations or 0) do
+        local smoothed = { { result[1][1], result[1][2] } }
+        for index = 1, #result - 1 do
+            local point, nextPoint = result[index], result[index + 1]
+            smoothed[#smoothed + 1] = {
+                (point[1] * 0.75) + (nextPoint[1] * 0.25),
+                (point[2] * 0.75) + (nextPoint[2] * 0.25),
+            }
+            smoothed[#smoothed + 1] = {
+                (point[1] * 0.25) + (nextPoint[1] * 0.75),
+                (point[2] * 0.25) + (nextPoint[2] * 0.75),
+            }
+        end
+        smoothed[#smoothed + 1] = { result[#result][1], result[#result][2] }
+        result = smoothed
+    end
+    return result
+end
+
+local function BuildABRoadContour(path)
+    if not path or #path < 2 then return {} end
+    local centers = SmoothABOpenPath(path, 2)
+    local left, right, tangents, normals = {}, {}, {}, {}
+    for index, point in ipairs(centers) do
+        local before = centers[math.max(1, index - 1)]
+        local after = centers[math.min(#centers, index + 1)]
+        local dx, dy = after[1] - before[1], after[2] - before[2]
+        local length = math.sqrt((dx * dx) + (dy * dy))
+        local nx, ny = 0, 0
+        if length > 0 then
+            nx = (-dy / length) * AB_AREA_VISUAL.roadHalfWidth
+            ny = (dx / length) * AB_AREA_VISUAL.roadHalfWidth
+        end
+        tangents[index] = { length > 0 and (dx / length) or 0, length > 0 and (dy / length) or 0 }
+        normals[index] = { nx, ny }
+        left[#left + 1] = { point[1] + nx, point[2] + ny }
+        right[#right + 1] = { point[1] - nx, point[2] - ny }
+    end
+
+    local contour = {}
+    for _, point in ipairs(left) do contour[#contour + 1] = point end
+    local finish, finishTangent, finishNormal = centers[#centers], tangents[#centers], normals[#centers]
+    for step = 1, 6 do
+        local angle = math.pi * step / 6
+        contour[#contour + 1] = {
+            finish[1] + (finishNormal[1] * math.cos(angle)) + (finishTangent[1] * AB_AREA_VISUAL.roadHalfWidth * math.sin(angle)),
+            finish[2] + (finishNormal[2] * math.cos(angle)) + (finishTangent[2] * AB_AREA_VISUAL.roadHalfWidth * math.sin(angle)),
+        }
+    end
+    for index = #right - 1, 1, -1 do contour[#contour + 1] = right[index] end
+    local start, startTangent, startNormal = centers[1], tangents[1], normals[1]
+    for step = 1, 5 do
+        local angle = math.pi * step / 6
+        contour[#contour + 1] = {
+            start[1] - (startNormal[1] * math.cos(angle)) - (startTangent[1] * AB_AREA_VISUAL.roadHalfWidth * math.sin(angle)),
+            start[2] - (startNormal[2] * math.cos(angle)) - (startTangent[2] * AB_AREA_VISUAL.roadHalfWidth * math.sin(angle)),
+        }
+    end
+    return contour
+end
+
+local function GetABVisualContours(zone)
+    if not zone then return {} end
+    if zone.points then return { SmoothABContour(zone.points, 2) } end
+    local contours = {}
+    for _, path in ipairs(zone.hitPaths or {}) do
+        local contour = BuildABRoadContour(path)
+        if #contour >= 3 then contours[#contours + 1] = contour end
+    end
+    return contours
+end
+
+local function GetABVisualBounds(zone)
+    local minX, minY, maxX, maxY
+    for _, contour in ipairs(GetABVisualContours(zone)) do
+        for _, point in ipairs(contour) do
+            minX = minX and math.min(minX, point[1]) or point[1]
+            minY = minY and math.min(minY, point[2]) or point[2]
+            maxX = maxX and math.max(maxX, point[1]) or point[1]
+            maxY = maxY and math.max(maxY, point[2]) or point[2]
+        end
+    end
+    return minX, minY, maxX, maxY
+end
+
+local function GetABControlledFactionColor(zone)
+    if not zone or not zone.isBase then return nil end
+    local baseNode = BASE_NODE_BY_ID[zone.id]
+    if not baseNode then return nil end
+    local textureIndex = abTestMode and tonumber(abTestBaseNodeStates[zone.id]) or nil
+    textureIndex = textureIndex or tonumber(baseNode.currentTextureIndex) or baseNode.neutralTextureIndex
+    local offset = textureIndex - baseNode.neutralTextureIndex
+    if offset == 2 then return unpack(AB_AREA_VISUAL.allianceColor) end
+    if offset == 4 then return unpack(AB_AREA_VISUAL.hordeColor) end
+    return nil
+end
+
+local function CreateABHighlight()
+    local overlay = CreateFrame("Frame", nil, map)
+    overlay:SetAllPoints()
+    overlay:SetFrameLevel(map:GetFrameLevel() + 1)
+    overlay:EnableMouse(false)
+
+    overlay.shadowTexture = overlay:CreateTexture(nil, "BORDER")
+    overlay.shadowTexture:SetAllPoints()
+    overlay.shadowTexture:SetVertexColor(0, 0, 0, AB_AREA_VISUAL.shadowAlpha)
+    overlay.shadowTexture:Hide()
+
+    overlay.texture = overlay:CreateTexture(nil, "ARTWORK")
+    overlay.texture:SetAllPoints()
+
+    overlay.animatedMask = overlay:CreateMaskTexture(nil, "ARTWORK")
+    overlay.animatedMask:SetAllPoints()
+    overlay.animatedFillTexture = overlay:CreateTexture(nil, "ARTWORK", nil, 1)
+    overlay.animatedFillTexture:SetAllPoints()
+    overlay.animatedFillTexture:AddMaskTexture(overlay.animatedMask)
+    overlay.animatedFillTexture:Hide()
+    overlay.animatedStripeTexture = overlay:CreateTexture(nil, "OVERLAY", nil, 1)
+    overlay.animatedStripeTexture:SetAllPoints()
+    overlay.animatedStripeTexture:SetTexture(AB_AREA_VISUAL.stripeTexture)
+    overlay.animatedStripeTexture:SetBlendMode("BLEND")
+    overlay.animatedStripeTexture:AddMaskTexture(overlay.animatedMask)
+    overlay.animatedStripeTexture:Hide()
+    overlay.animatedBorderSegments = {}
+    overlay.animatedContourGeometry = {}
+
+    function overlay:SetZone(zone)
+        self.zone = zone
+        local r, g, b = GetABControlledFactionColor(zone)
+        local textureFolder = r and "Contested" or "Highlights"
+        local texturePath = "Interface\\AddOns\\ZurkMaps\\Media\\" .. textureFolder .. "\\" .. zone.id
+        self.shadowTexture:SetTexture(texturePath)
+        self.texture:SetTexture(texturePath)
+        self.texture:SetVertexColor(r or 1, g or 1, b or 1, 1)
+        self.animatedMask:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\CalloutMasks\\" .. zone.id)
+        if self.animatedActive then self:BuildAnimatedGeometry() else self.texture:Show() end
+    end
+
+    function overlay:GetAnimatedBorderPoint(geometry, distance)
+        local perimeter = geometry and geometry.perimeter or 0
+        if perimeter <= 0 then return 0, 0 end
+        distance = distance % perimeter
+        local traversed = 0
+        for index, point in ipairs(geometry.points) do
+            local length = geometry.edgeLengths[index]
+            if distance <= traversed + length or index == #geometry.points then
+                local nextPoint = geometry.points[(index % #geometry.points) + 1]
+                local ratio = length > 0 and ((distance - traversed) / length) or 0
+                return point[1] + ((nextPoint[1] - point[1]) * ratio),
+                    point[2] + ((nextPoint[2] - point[2]) * ratio)
+            end
+            traversed = traversed + length
+        end
+        return geometry.points[1][1], geometry.points[1][2]
+    end
+
+    function overlay:BuildAnimatedGeometry()
+        self.texture:Hide()
+        self.animatedFillTexture:Hide()
+        self.animatedStripeTexture:Hide()
+        for _, segment in ipairs(self.animatedBorderSegments) do segment:Hide() end
+        self.animatedContourGeometry = {}
+        self.animatedBorderCount = 0
+        if not self.animatedActive or not self.zone then return end
+
+        local width, height = self:GetWidth(), self:GetHeight()
+        if not width or not height or width <= 0 or height <= 0 then return end
+        local r, g, b = self.animatedR or 1, self.animatedG or 1, self.animatedB or 1
+        self.animatedFillTexture:SetColorTexture(r, g, b, 72 / 255)
+        self.animatedFillTexture:Show()
+        self.animatedStripeTexture:SetVertexColor(r, g, b, AB_AREA_VISUAL.stripeAlpha)
+        self.animatedStripeTexture:Show()
+
+        local segmentIndex = 0
+        for _, contour in ipairs(GetABVisualContours(self.zone)) do
+            local pixelPoints, edgeLengths, perimeter = {}, {}, 0
+            for _, point in ipairs(contour) do
+                pixelPoints[#pixelPoints + 1] = { point[1] * width / 100, point[2] * height / 100 }
+            end
+            for index, point in ipairs(pixelPoints) do
+                local nextPoint = pixelPoints[(index % #pixelPoints) + 1]
+                local dx, dy = nextPoint[1] - point[1], nextPoint[2] - point[2]
+                local length = math.sqrt((dx * dx) + (dy * dy))
+                edgeLengths[index] = length
+                perimeter = perimeter + length
+            end
+            if perimeter > 0 then
+                local segmentCount = math.max(10, math.min(40, math.floor((perimeter / 8) + 0.5)))
+                local geometry = {
+                    points = pixelPoints,
+                    edgeLengths = edgeLengths,
+                    perimeter = perimeter,
+                    cellLength = perimeter / segmentCount,
+                    firstSegment = segmentIndex + 1,
+                    segmentCount = segmentCount,
+                }
+                self.animatedContourGeometry[#self.animatedContourGeometry + 1] = geometry
+                for localIndex = 1, segmentCount do
+                    segmentIndex = segmentIndex + 1
+                    local startDistance = (localIndex - 1) * geometry.cellLength
+                    local x1, y1 = self:GetAnimatedBorderPoint(geometry, startDistance)
+                    local x2, y2 = self:GetAnimatedBorderPoint(geometry, startDistance + (geometry.cellLength * 0.68))
+                    local segment = self.animatedBorderSegments[segmentIndex]
+                    if not segment then
+                        segment = self:CreateLine(nil, "OVERLAY")
+                        self.animatedBorderSegments[segmentIndex] = segment
+                    end
+                    segment:SetColorTexture(r, g, b, 1)
+                    segment:SetThickness(2.35)
+                    segment:SetStartPoint("TOPLEFT", self, x1, -y1)
+                    segment:SetEndPoint("TOPLEFT", self, x2, -y2)
+                    segment:SetAlpha(AB_AREA_VISUAL.borderAlpha * (self.animatedPulseAlpha or 1))
+                    segment:Show()
+                end
+            end
+        end
+        self.animatedBorderCount = segmentIndex
+        self:UpdateAnimatedAnimation(self.animatedAge or 0)
+    end
+
+    function overlay:SetAnimatedColor(r, g, b)
+        self.animatedR, self.animatedG, self.animatedB = r, g, b
+        if self.animatedActive then self:BuildAnimatedGeometry() end
+    end
+
+    function overlay:SetAnimatedActive(active)
+        self.animatedActive = active and true or false
+        if self.animatedActive then
+            self.shadowMode = "ANIMATED"
+            self.pendingHoverExit = false
+            self.contentOffset, self.contentTargetOffset = 0, 0
+            self.animatedPulseAlpha = 1
+            self:ApplyContentOffset()
+            self:ApplyShadow()
+            self:BuildAnimatedGeometry()
+            self:Show()
+        else
+            self.shadowMode = nil
+            self.pendingHoverExit = false
+            self.interactionActive = false
+            self.interactionPressed = false
+            self.releaseActive = false
+            self.releaseElapsed, self.releaseStartOffset = nil, nil
+            self.contentOffset, self.contentTargetOffset = 0, 0
+            self:ApplyContentOffset()
+            self.shadowTexture:Hide()
+            self.animatedFillTexture:Hide()
+            self.animatedStripeTexture:Hide()
+            for _, segment in ipairs(self.animatedBorderSegments) do segment:Hide() end
+            self.animatedBorderCount = 0
+            self.animatedContourGeometry = {}
+            self.animatedPulseAlpha = 1
+            if self.zone then self.texture:Show() end
+        end
+    end
+
+    function overlay:SetAnimatedPulseAlpha(alpha)
+        alpha = math.max(0, math.min(1, tonumber(alpha) or 1))
+        self.animatedPulseAlpha = alpha
+        self.animatedFillTexture:SetAlpha(alpha)
+        self.animatedStripeTexture:SetAlpha(alpha)
+        for index = 1, (self.animatedBorderCount or 0) do
+            self.animatedBorderSegments[index]:SetAlpha(AB_AREA_VISUAL.borderAlpha * alpha)
+        end
+        if self.animatedActive then self:ApplyShadow() end
+    end
+
+    function overlay:UpdateAnimatedAnimation(age)
+        if not self.animatedActive then return end
+        age = tonumber(age) or 0
+        self.animatedAge = age
+        local stripePhase = ((age % AB_AREA_VISUAL.stripeCycle) / AB_AREA_VISUAL.stripeCycle) * AB_AREA_VISUAL.stripeTile
+        self.animatedStripeTexture:SetTexCoord(
+            stripePhase / AB_AREA_VISUAL.stripeLong,
+            (stripePhase + self:GetWidth()) / AB_AREA_VISUAL.stripeLong,
+            0,
+            self:GetHeight() / AB_AREA_VISUAL.stripeShort
+        )
+        for _, geometry in ipairs(self.animatedContourGeometry or {}) do
+            local borderOffset = ((age % AB_AREA_VISUAL.borderDashCycle) / AB_AREA_VISUAL.borderDashCycle) * geometry.cellLength
+            for localIndex = 1, geometry.segmentCount do
+                local startDistance = ((localIndex - 1) * geometry.cellLength) + borderOffset
+                local x1, y1 = self:GetAnimatedBorderPoint(geometry, startDistance)
+                local x2, y2 = self:GetAnimatedBorderPoint(geometry, startDistance + (geometry.cellLength * 0.68))
+                local segment = self.animatedBorderSegments[geometry.firstSegment + localIndex - 1]
+                segment:SetStartPoint("TOPLEFT", self, x1, -y1)
+                segment:SetEndPoint("TOPLEFT", self, x2, -y2)
+                segment:SetAlpha(AB_AREA_VISUAL.borderAlpha * (self.animatedPulseAlpha or 1))
+            end
+        end
+    end
+
+    function overlay:ApplyContentOffset()
+        local offset = tonumber(self.contentOffset) or 0
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", map, "TOPLEFT", offset, -offset)
+        self:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", offset, -offset)
+    end
+
+    function overlay:ApplyShadow()
+        if not self.shadowMode then
+            self.shadowTexture:Hide()
+            return
+        end
+        local offset = AB_AREA_VISUAL.shadowOffset - (tonumber(self.contentOffset) or 0)
+        self.shadowTexture:ClearAllPoints()
+        self.shadowTexture:SetPoint("TOPLEFT", self, "TOPLEFT", offset, -offset)
+        self.shadowTexture:SetSize(self:GetWidth(), self:GetHeight())
+        self.shadowTexture:SetVertexColor(0, 0, 0, self.interactionPressed and 0.20 or AB_AREA_VISUAL.shadowAlpha)
+        self.shadowTexture:Show()
+    end
+
+    function overlay:BeginInteractionRelease()
+        self.interactionPressed = false
+        self.contentTargetOffset = AB_AREA_VISUAL.hoverOffset
+        self.releaseStartOffset = math.max(0, tonumber(self.contentOffset) or 0)
+        self.releaseElapsed = 0
+        self.releaseActive = self.releaseStartOffset > 0.001
+    end
+
+    function overlay:SetHoverInteraction(active)
+        if active then
+            self.pendingHoverExit = false
+            self.interactionActive = true
+            self.shadowMode = self.animatedActive and "ANIMATED" or "HOVER"
+            self.contentOffset = self.contentOffset or AB_AREA_VISUAL.hoverOffset
+            self.contentTargetOffset = AB_AREA_VISUAL.hoverOffset
+            self:ApplyShadow()
+            return
+        end
+
+        local wasPressed = self.interactionPressed
+        self.interactionActive = false
+        if wasPressed then self:BeginInteractionRelease() end
+        self.contentTargetOffset = AB_AREA_VISUAL.hoverOffset
+
+        if self.animatedActive then
+            self.pendingHoverExit = false
+            self.shadowMode = "ANIMATED"
+            self:ApplyShadow()
+        elseif self.releaseActive or math.abs(tonumber(self.contentOffset) or 0) > 0.02 then
+            if not self.releaseActive then self:BeginInteractionRelease() end
+            self.pendingHoverExit = true
+            self.shadowMode = "HOVER_RELEASE"
+            self:ApplyShadow()
+        else
+            self.pendingHoverExit = false
+            self.shadowMode = nil
+            self.contentOffset, self.contentTargetOffset = 0, 0
+            self:ApplyContentOffset()
+            self.shadowTexture:Hide()
+        end
+    end
+
+    function overlay:SetInteractionPressed(pressed)
+        if not self.interactionActive then return end
+        if pressed then
+            self.interactionPressed = true
+            self.releaseActive = false
+            self.contentOffset = AB_AREA_VISUAL.pressedOffset
+            self.contentTargetOffset = AB_AREA_VISUAL.pressedOffset
+        else
+            self:BeginInteractionRelease()
+        end
+        self:ApplyContentOffset()
+        self:ApplyShadow()
+    end
+
+    function overlay:UpdateInteractionAnimation(elapsed)
+        if not self.shadowMode then return end
+        elapsed = math.max(0, tonumber(elapsed) or 0)
+        if self.interactionPressed then
+            self.contentOffset = AB_AREA_VISUAL.pressedOffset
+        elseif self.releaseActive then
+            self.releaseElapsed = (self.releaseElapsed or 0) + elapsed
+            local progress = math.min(1, self.releaseElapsed / AB_AREA_VISUAL.releaseDuration)
+            self.contentOffset = (self.releaseStartOffset or 0) * ((1 - progress) ^ 3)
+            if progress >= 1 then
+                self.contentOffset = AB_AREA_VISUAL.hoverOffset
+                self.releaseActive = false
+                self.releaseElapsed, self.releaseStartOffset = nil, nil
+            end
+        else
+            self.contentOffset = self.contentTargetOffset or AB_AREA_VISUAL.hoverOffset
+        end
+
+        if self.pendingHoverExit and not self.releaseActive then
+            self.contentOffset, self.contentTargetOffset = 0, 0
+            self.pendingHoverExit = false
+            self.shadowMode = nil
+            self:ApplyContentOffset()
+            self.shadowTexture:Hide()
+            self:Hide()
+            return
+        end
+        self:ApplyContentOffset()
+        self:ApplyShadow()
+    end
+
+    function overlay:IsFinishingHoverRelease()
+        return self.pendingHoverExit and true or false
+    end
+
+    overlay:SetScript("OnSizeChanged", function(self)
+        if self.shadowMode then self:ApplyShadow() end
+        if self.animatedActive then self:BuildAnimatedGeometry() end
+    end)
+    overlay:Hide()
+    return overlay
+end
+
+local highlightTexture = CreateABHighlight()
+
+local function ClearABAreaInteraction()
+    if hoveredAreaOverlay then hoveredAreaOverlay:SetHoverInteraction(false) end
+    hoveredAreaOverlay = nil
+    if not highlightTexture:IsFinishingHoverRelease() then highlightTexture:Hide() end
+end
 
 local moveHandle = CreateFrame(
     "Frame",
@@ -824,7 +1312,7 @@ local function StartMove()
 
     isMoving = true
     hoveredZone = nil
-    highlightTexture:Hide()
+    ClearABAreaInteraction()
     GameTooltip:Hide()
     frame:StartMoving()
 end
@@ -904,7 +1392,7 @@ local function BeginResize()
     resizing = true
     resizeState = ZurkMapsMapResize.Begin(frame, mapBorder)
     hoveredZone = nil
-    highlightTexture:Hide()
+    ClearABAreaInteraction()
     GameTooltip:Hide()
 end
 
@@ -1229,7 +1717,7 @@ focusCallout.button:SetScript("OnClick", function()
     end
 
     hoveredZone = nil
-    highlightTexture:Hide()
+    ClearABAreaInteraction()
     GameTooltip:Hide()
     focusCallout:RefreshOptions()
     focusCallout:AnchorMenu()
@@ -1515,7 +2003,7 @@ battlecry.button:SetScript("OnEnter", function(self)
     battlecry.icon:SetAlpha(1)
     battlecry.border:SetAlpha(1)
     hoveredZone = nil
-    highlightTexture:Hide()
+    ClearABAreaInteraction()
     GameTooltip:Hide()
     GameTooltip:SetOwner(UIParent, "ANCHOR_NONE")
     if GameTooltip_SetDefaultAnchor then
@@ -1710,28 +2198,8 @@ local function FindZone(x, y)
         return nil
 end
 
-local function ShowZone(zone)
-    if hoveredZone == zone then
-        return
-    end
-
-    hoveredZone = zone
-    GameTooltip:Hide()
-
-    if not zone then
-        highlightTexture:Hide()
-        return
-    end
-
-    local contestedState = zone.isBase and contestedBaseStates[zone.id] or nil
-    if contestedState and contestedState.active then
-        highlightTexture:Hide()
-    else
-        highlightTexture:SetTexture(
-            "Interface\\AddOns\\ZurkMaps\\Media\\Highlights\\" .. zone.id
-        )
-        highlightTexture:Show()
-    end
+local function ShowZoneTooltip(zone)
+    if not zone then return end
 
     GameTooltip:SetOwner(UIParent, "ANCHOR_NONE")
     if GameTooltip_SetDefaultAnchor then
@@ -1742,12 +2210,51 @@ local function ShowZone(zone)
     end
     GameTooltip:SetText(zone.name)
     if zone.isBase then
-        GameTooltip:AddLine("Right-click for HELP", 0.72, 0.66, 0.50)
-        GameTooltip:AddLine("Shift-click to report WEAK", 0.72, 0.66, 0.50)
+        GameTooltip:AddLine("Left-click: Report " .. GetBaseReportDescriptor(zone), 0.72, 0.66, 0.50)
+        GameTooltip:AddLine("Right-click: Call for HELP", 0.72, 0.66, 0.50)
+        GameTooltip:AddLine("Shift-click: Report WEAK", 0.72, 0.66, 0.50)
     else
         GameTooltip:AddLine("Right-click for Get OUT", 0.72, 0.66, 0.50)
     end
     GameTooltip:Show()
+end
+
+local function ShowZone(zone)
+    local contestedState = zone and zone.isBase and contestedBaseStates[zone.id] or nil
+    local contestedVisual = contestedState and contestedState.active and contestedBaseVisuals[zone.id] or nil
+    local areaOverlay = contestedVisual and contestedVisual.overlay or (zone and highlightTexture or nil)
+    if hoveredZone == zone and hoveredAreaOverlay == areaOverlay then
+        return
+    end
+
+    if hoveredAreaOverlay then hoveredAreaOverlay:SetHoverInteraction(false) end
+    if hoveredAreaOverlay == highlightTexture and not highlightTexture:IsFinishingHoverRelease() then
+        highlightTexture:Hide()
+    end
+    hoveredAreaOverlay = nil
+    hoveredZone = zone
+    GameTooltip:Hide()
+
+    if not zone then
+        if not highlightTexture:IsFinishingHoverRelease() then
+            highlightTexture:Hide()
+        end
+        return
+    end
+
+    if contestedVisual and contestedVisual.overlay then
+        highlightTexture:Hide()
+        contestedVisual.overlay:SetHoverInteraction(true)
+        contestedVisual.overlay:Show()
+        hoveredAreaOverlay = contestedVisual.overlay
+    else
+        highlightTexture:SetZone(zone)
+        highlightTexture:SetHoverInteraction(true)
+        highlightTexture:Show()
+        hoveredAreaOverlay = highlightTexture
+    end
+
+    ShowZoneTooltip(zone)
 end
 
 -- Live AB base nodes. Blizzard's own POI icon sheet and live objective
@@ -1946,6 +2453,9 @@ local function UpdateBaseNodeButton(baseNode, textureIndex)
     end
 
     UpdateBaseNodeHighlightColor(baseNode)
+    if hoveredZone and hoveredZone.id == baseNode.id and hoveredAreaOverlay == highlightTexture then
+        highlightTexture:SetZone(hoveredZone)
+    end
 end
 
 local function ReadLegacyBaseNodeStates(states, poiData)
@@ -2099,12 +2609,15 @@ for _, baseNode in ipairs(BASE_NODES) do
     button:SetScript("OnEnter", function(self)
         hoveredBaseNode = baseNode
         hoveredZone = nil
-        highlightTexture:Hide()
+        ClearABAreaInteraction()
         GameTooltip:Hide()
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(baseNode.name)
         GameTooltip:AddLine(baseNode.currentStatus or "Unclaimed", 0.82, 0.82, 0.82)
-        GameTooltip:AddLine("Click: SPIN", 0.72, 0.66, 0.50)
+        GameTooltip:AddLine("Area menu: " .. GetBaseReportDescriptor(ZONE_BY_ID[baseNode.id]), 0.82, 0.82, 0.82)
+        GameTooltip:AddLine("Left-click: SPIN", 0.72, 0.66, 0.50)
+        GameTooltip:AddLine("Right-click: Call for HELP", 0.72, 0.66, 0.50)
+        GameTooltip:AddLine("Shift-click: Report WEAK", 0.72, 0.66, 0.50)
         GameTooltip:Show()
     end)
 
@@ -2127,9 +2640,9 @@ for _, baseNode in ipairs(BASE_NODES) do
     UpdateBaseNodeHighlightColor(baseNode)
 end
 
--- Contested-base visualization. It uses the five base hotspot shapes
--- as persistent illumination masks while a base is contested, independent of hover.
--- Hotspots retain AB's assault-faction colors; clocks use AV's gold countdown
+-- Contested bases reuse the interactive area renderer. Their faction-colored
+-- masks keep the WSG-style stripes, rotating segmented border, and anchored
+-- shadow active independently of hover; the clocks retain AV's gold countdown
 -- border and faction-colored completion pulse.
 local ALLIANCE_CONTEST_R, ALLIANCE_CONTEST_G, ALLIANCE_CONTEST_B = 0.12, 0.36, 1.00 -- vivid royal Alliance blue
 local HORDE_CONTEST_R, HORDE_CONTEST_G, HORDE_CONTEST_B = 1.00, 0.20, 0.16
@@ -2192,9 +2705,15 @@ local function HideContestedBase(baseID)
         state.timerExpired = false
         state.expiredFaction = nil
         state.animationStart = nil
+        state.visualStart = nil
     end
-    if visual then
-        visual.texture:Hide()
+    if visual and visual.overlay then
+        if hoveredAreaOverlay == visual.overlay then
+            hoveredAreaOverlay = nil
+            hoveredZone = nil
+        end
+        visual.overlay:SetAnimatedActive(false)
+        visual.overlay:Hide()
         ZurkMapsCaptureClock.Reset(visual.timerFrame)
         visual.timerFrame:Hide()
     end
@@ -2210,10 +2729,15 @@ local function FinishContestedBase(baseID, completionFaction)
         state.expiredFaction = state.faction
         state.endTime = nil
         state.animationStart = GetTime()
+        state.visualStart = nil
     end
-    if visual then
-        visual.texture:Hide()
-        visual.texture:SetAlpha(1)
+    if visual and visual.overlay then
+        if hoveredAreaOverlay == visual.overlay then
+            hoveredAreaOverlay = nil
+            hoveredZone = nil
+        end
+        visual.overlay:SetAnimatedActive(false)
+        visual.overlay:Hide()
         ZurkMapsCaptureClock.Complete(visual.timerFrame, completionFaction or (state and state.faction))
         if hoveredContestTimerFrame == visual.timerFrame then
             hoveredContestTimerFrame = nil
@@ -2250,19 +2774,22 @@ local function StartContestedBase(baseNode, faction, durationSeconds, source, po
     state.timerExpired = false
     state.expiredFaction = nil
     state.animationStart = nil
+    state.visualStart = GetTime()
     state.endTime = durationSeconds and (GetTime() + math.max(0, durationSeconds)) or nil
     UpdateBaseNodeHighlightColor(baseNode)
 
     if faction == "Alliance" then
-        visual.texture:SetVertexColor(ALLIANCE_CONTEST_R, ALLIANCE_CONTEST_G, ALLIANCE_CONTEST_B, 1)
+        visual.overlay:SetAnimatedColor(ALLIANCE_CONTEST_R, ALLIANCE_CONTEST_G, ALLIANCE_CONTEST_B)
     else
-        visual.texture:SetVertexColor(HORDE_CONTEST_R, HORDE_CONTEST_G, HORDE_CONTEST_B, 1)
+        visual.overlay:SetAnimatedColor(HORDE_CONTEST_R, HORDE_CONTEST_G, HORDE_CONTEST_B)
     end
     ZurkMapsCaptureClock.Reset(visual.timerFrame)
     ZurkMapsCaptureClock.SetRemaining(visual.timerFrame, durationSeconds)
-    visual.texture:SetAlpha(1)
-    visual.texture:Show()
+    visual.overlay:SetAnimatedActive(true)
+    visual.overlay:SetAnimatedPulseAlpha(1)
+    visual.overlay:Show()
     visual.timerFrame:Show()
+    if hoveredZone and hoveredZone.id == baseNode.id then ShowZone(hoveredZone) end
 end
 
 UpdateContestedBaseState = function(baseNode, textureIndex, poiID)
@@ -2310,14 +2837,18 @@ for _, baseNode in ipairs(BASE_NODES) do
         timerExpired = false,
         expiredFaction = nil,
         animationStart = nil,
+        visualStart = nil,
     }
 
     local visual = {}
-    visual.texture = map:CreateTexture(nil, "ARTWORK", nil, 1)
-    visual.texture:SetAllPoints(map)
-    visual.texture:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\Contested\\" .. baseNode.id)
-    visual.texture:SetBlendMode("BLEND")
-    visual.texture:Hide()
+    visual.overlay = CreateABHighlight()
+    for _, zone in ipairs(ZONES) do
+        if zone.id == baseNode.id then
+            visual.overlay:SetZone(zone)
+            break
+        end
+    end
+    visual.overlay:Hide()
 
     local timerPosition = CONTEST_TIMER_POSITIONS[baseNode.id] or { x = baseNode.x, y = baseNode.y + 7 }
     visual.timerFrame = ZurkMapsCaptureClock.Create(map, mapBorder:GetFrameLevel() + 6)
@@ -2358,7 +2889,7 @@ for _, baseNode in ipairs(BASE_NODES) do
     visual.timerFrame:SetScript("OnEnter", function(self)
         hoveredContestTimerFrame = self
         hoveredZone = nil
-        highlightTexture:Hide()
+        ClearABAreaInteraction()
         -- ShowContestTimerTooltip() already clears/replaces GameTooltip. Do not call
         -- ClearFriendlyPlayerTooltip here because that local function is declared later
         -- in this file and is not in lexical scope at timer-frame construction time.
@@ -2392,6 +2923,7 @@ contestAnimationFrame:SetScript("OnUpdate", function(self, elapsed)
         local state = contestedBaseStates[baseNode.id]
         local visual = contestedBaseVisuals[baseNode.id]
         if state and visual then
+            visual.overlay:UpdateInteractionAnimation(elapsed)
             if state.animationStart then
                 -- Match AV's smooth border pulse and fade at the existing center.
                 if ZurkMapsCaptureClock.AnimateCompletion(visual.timerFrame, now - state.animationStart) then
@@ -2407,10 +2939,11 @@ contestAnimationFrame:SetScript("OnUpdate", function(self, elapsed)
                     local speed = rawRemaining and rawRemaining <= 5 and 9.0 or 4.5
                     local wave = 0.5 + (0.5 * math.sin(now * speed))
                     if state.faction == "Alliance" then
-                        visual.texture:SetAlpha(0.50 + (0.28 * wave))
+                        visual.overlay:SetAnimatedPulseAlpha(0.50 + (0.28 * wave))
                     else
-                        visual.texture:SetAlpha(0.46 + (0.26 * wave))
+                        visual.overlay:SetAnimatedPulseAlpha(0.46 + (0.26 * wave))
                     end
+                    visual.overlay:UpdateAnimatedAnimation(now - (state.visualStart or now))
                     if updateClock then
                         ZurkMapsCaptureClock.SetRemaining(visual.timerFrame, rawRemaining)
                     end
@@ -2612,6 +3145,7 @@ ZurkMapsABRank = ZurkMapsPlayerBlips.CreateRankController({
     iconScale = 0.924,
     baseDotSize = AB_FRIENDLY_PLAYER_DOT_SIZE,
     getFriendlyFrame = function() return friendlyPlayersFrame end,
+    getAddonFrame = function() return frame end,
     isAvailable = function() return friendlyPlayersFrameAvailable end,
     getMapFrame = function() return map end,
     getUiMapID = GetABUiMapID,
@@ -3010,7 +3544,7 @@ UpdateABTestBlips = function()
         elseif assignedIcon and ZurkMapsPlayerIcons.ApplyAssignedIcon then
             ZurkMapsPlayerIcons.ApplyAssignedIcon(blip, assignedIcon, dotSize * (ZurkMapsPlayerIcons.manualIconScale or 0.84))
         elseif agent.pvpRankNumber and agent.pvpRankNumber >= ZurkMapsABRank.min and agent.pvpRankNumber <= ZurkMapsABRank.max then
-            ZurkMapsPlayerBlips.ApplyRankBadge(blip, agent.pvpRankNumber, dotSize * ZurkMapsABRank.iconScale, agent.classToken)
+            ZurkMapsPlayerBlips.ApplyRankBadge(blip, agent.pvpRankNumber, ZurkMapsABRank.GetRankBadgeSize(), agent.classToken)
         else
             ZurkMapsPlayerBlips.ApplyGoldBlip(blip, dotSize, AB_TEST_GOLD_R, AB_TEST_GOLD_G, AB_TEST_GOLD_B)
         end
@@ -3084,14 +3618,9 @@ local function ShowABTestPlayerTooltip(players)
 end
 
 local abTestMovementFrame = CreateFrame("Frame", nil, frame)
-local abTestMovementElapsed = 0
 abTestMovementFrame:SetScript("OnUpdate", function(_, elapsed)
     if not abTestMode then return end
-    abTestMovementElapsed = abTestMovementElapsed + elapsed
-    if abTestMovementElapsed < 0.05 then return end
-    local step = abTestMovementElapsed
-    abTestMovementElapsed = 0
-    AdvanceABTestAgents(step)
+    AdvanceABTestAgents(elapsed)
     UpdateABTestBlips()
 end)
 
@@ -3199,13 +3728,22 @@ local function ClearFriendlyPlayerTooltip()
     end
 end
 
--- Hotspot dropdowns are configured by hotspot type.
--- Bases: Safe, then 1+ through 7+.
--- Other hotspots: 1+ through 4+, then Get OUT.
+-- Compact two-column command pad. Every numbered callout uses the same 2x4
+-- layout: 1+ through 7+, with Safe or Get OUT in the final cell.
 local INCOMING_MENU_WIDTH = 82
 local INCOMING_OPTION_HEIGHT = 25
-local INCOMING_MENU_PADDING = 5
+local INCOMING_MENU_HEADER_HEIGHT = 14
+local INCOMING_MENU_PADDING = 4
 local INCOMING_MENU_MAX_OPTIONS = 8
+local INCOMING_MENU_POP_SECONDS = 0.09
+local INCOMING_BUTTON_STYLE = {
+    headerGap = 4,
+    columnGap = 1,
+    rowGap = 1,
+    pressDepth = 2,
+    downSeconds = 0.045,
+    upSeconds = 0.065,
+}
 local incomingMenu
 local incomingMenuDismiss
 local incomingMenuZone = nil
@@ -3215,14 +3753,33 @@ local incomingMenuAnchor = CreateFrame("Frame", nil, map)
 incomingMenuAnchor:SetSize(1, 1)
 incomingMenuAnchor:SetPoint("CENTER", map, "CENTER", 0, 0)
 
-local function CloseIncomingMenu()
+local function CloseIncomingMenu(preserveHoverAtCursor)
+    local closingZone = incomingMenuZone
     if incomingMenu then
+        incomingMenu.popElapsed = nil
+        incomingMenu:SetAlpha(1)
         incomingMenu:Hide()
     end
     if incomingMenuDismiss then
         incomingMenuDismiss:Hide()
     end
     incomingMenuZone = nil
+
+    -- The dismiss frame receives a repeated click on the selected area. Keep
+    -- its existing overlay alive instead of hiding it for one update frame and
+    -- immediately rebuilding it under the stationary cursor.
+    if preserveHoverAtCursor and closingZone then
+        local x, y = GetMousePercent()
+        if FindZone(x, y) == closingZone then
+            if hoveredZone ~= closingZone or not hoveredAreaOverlay then
+                ShowZone(closingZone)
+            else
+                ShowZoneTooltip(closingZone)
+            end
+            return
+        end
+    end
+
     ShowZone(nil)
 end
 
@@ -3232,7 +3789,9 @@ incomingMenuDismiss:SetFrameStrata("DIALOG")
 incomingMenuDismiss:SetFrameLevel(90)
 incomingMenuDismiss:EnableMouse(true)
 incomingMenuDismiss:RegisterForClicks("AnyUp")
-incomingMenuDismiss:SetScript("OnClick", CloseIncomingMenu)
+incomingMenuDismiss:SetScript("OnClick", function()
+    CloseIncomingMenu(true)
+end)
 incomingMenuDismiss:Hide()
 
 incomingMenu = CreateFrame(
@@ -3243,7 +3802,11 @@ incomingMenu = CreateFrame(
 )
 incomingMenu:SetSize(
     INCOMING_MENU_WIDTH,
-    (INCOMING_OPTION_HEIGHT * INCOMING_MENU_MAX_OPTIONS) + (INCOMING_MENU_PADDING * 2)
+    (INCOMING_MENU_PADDING * 2)
+        + INCOMING_MENU_HEADER_HEIGHT
+        + INCOMING_BUTTON_STYLE.headerGap
+        + (INCOMING_OPTION_HEIGHT * 4)
+        + (INCOMING_BUTTON_STYLE.rowGap * 3)
 )
 incomingMenu:SetFrameStrata("DIALOG")
 incomingMenu:SetFrameLevel(91)
@@ -3264,38 +3827,125 @@ end
 
 incomingMenu:Hide()
 
-local function AnchorIncomingMenu(x, y)
+-- The tooltip background texture has transparency baked into it. Seat an
+-- opaque panel beneath it so map details cannot wash out the compact heading.
+local incomingMenuOpaqueBackground = incomingMenu:CreateTexture(nil, "BACKGROUND", nil, -1)
+incomingMenuOpaqueBackground:SetTexture("Interface\\Buttons\\WHITE8X8")
+incomingMenuOpaqueBackground:SetPoint("TOPLEFT", incomingMenu, "TOPLEFT", 4, -4)
+incomingMenuOpaqueBackground:SetPoint("BOTTOMRIGHT", incomingMenu, "BOTTOMRIGHT", -4, 4)
+incomingMenuOpaqueBackground:SetVertexColor(0.018, 0.014, 0.010, 1)
+
+local incomingMenuHeadingBackground = incomingMenu:CreateTexture(nil, "BACKGROUND", nil, 1)
+incomingMenuHeadingBackground:SetTexture("Interface\\Buttons\\WHITE8X8")
+incomingMenuHeadingBackground:SetPoint("TOPLEFT", incomingMenu, "TOPLEFT", 5, -5)
+incomingMenuHeadingBackground:SetPoint("TOPRIGHT", incomingMenu, "TOPRIGHT", -5, -5)
+incomingMenuHeadingBackground:SetHeight(INCOMING_MENU_HEADER_HEIGHT)
+incomingMenuHeadingBackground:SetVertexColor(0.07, 0.045, 0.018, 1)
+
+local incomingMenuHeadingDivider = incomingMenu:CreateTexture(nil, "BORDER")
+incomingMenuHeadingDivider:SetTexture("Interface\\Buttons\\WHITE8X8")
+incomingMenuHeadingDivider:SetPoint("TOPLEFT", incomingMenuHeadingBackground, "BOTTOMLEFT", 0, 0)
+incomingMenuHeadingDivider:SetPoint("TOPRIGHT", incomingMenuHeadingBackground, "BOTTOMRIGHT", 0, 0)
+incomingMenuHeadingDivider:SetHeight(1)
+incomingMenuHeadingDivider:SetVertexColor(0.62, 0.48, 0.24, 0.28)
+
+local incomingMenuHeading = incomingMenu:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+incomingMenuHeading:SetPoint("TOPLEFT", incomingMenu, "TOPLEFT", INCOMING_MENU_PADDING, -INCOMING_MENU_PADDING)
+incomingMenuHeading:SetPoint("TOPRIGHT", incomingMenu, "TOPRIGHT", -INCOMING_MENU_PADDING, -INCOMING_MENU_PADDING)
+incomingMenuHeading:SetHeight(INCOMING_MENU_HEADER_HEIGHT)
+incomingMenuHeading:SetTextColor(1, 0.74, 0.18, 1)
+incomingMenuHeading:SetJustifyH("CENTER")
+if incomingMenuHeading.SetWordWrap then incomingMenuHeading:SetWordWrap(false) end
+if incomingMenuHeading.SetNonSpaceWrap then incomingMenuHeading:SetNonSpaceWrap(false) end
+if incomingMenuHeading.SetMaxLines then incomingMenuHeading:SetMaxLines(1) end
+
+local function AnchorIncomingMenu(zone)
+    local minX, minY, maxX, maxY = GetABVisualBounds(zone)
+    if not minX then return end
+    local centerY = (minY + maxY) / 2
+    local placeRight = maxX <= 78
+    local anchorX = placeRight and maxX or minX
+
     incomingMenuAnchor:ClearAllPoints()
     incomingMenuAnchor:SetPoint(
         "TOPLEFT",
         map,
         "TOPLEFT",
-        (x / 100) * map:GetWidth(),
-        -(y / 100) * map:GetHeight()
+        (anchorX / 100) * map:GetWidth(),
+        -(centerY / 100) * map:GetHeight()
     )
 
-    incomingMenu:SetScale(frame:GetScale())
+    incomingMenu.baseScale = frame:GetScale()
+    incomingMenu:SetScale(incomingMenu.baseScale * 0.94)
+    incomingMenu:SetAlpha(1)
     incomingMenu:ClearAllPoints()
-    incomingMenu:SetPoint("TOPLEFT", incomingMenuAnchor, "BOTTOMLEFT", 0, -2)
+    if placeRight then
+        incomingMenu:SetPoint("LEFT", incomingMenuAnchor, "RIGHT", 5, 0)
+    else
+        incomingMenu:SetPoint("RIGHT", incomingMenuAnchor, "LEFT", -5, 0)
+    end
 end
+
+incomingMenu:SetScript("OnUpdate", function(self, elapsed)
+    if not self.popElapsed then return end
+    self.popElapsed = self.popElapsed + math.max(0, tonumber(elapsed) or 0)
+    local progress = math.min(1, self.popElapsed / INCOMING_MENU_POP_SECONDS)
+    local eased = 1 - ((1 - progress) ^ 3)
+    self:SetScale((self.baseScale or frame:GetScale()) * (0.94 + (0.06 * eased)))
+    if progress >= 1 then
+        self.popElapsed = nil
+        self:SetScale(self.baseScale or frame:GetScale())
+        self:SetAlpha(1)
+    end
+end)
 
 local function GetIncomingMenuEntries(zone)
     if zone and zone.isBase then
-        return { "Safe", "1+", "2+", "3+", "4+", "5+", "6+", "7+" }
+        return { "1+", "2+", "3+", "4+", "5+", "6+", "7+", "Safe" }
     end
 
-    return { "1+", "2+", "3+", "4+", "Get OUT" }
+    return { "1+", "2+", "3+", "4+", "5+", "6+", "7+", "Get OUT" }
 end
 
 local function ConfigureIncomingMenu(zone)
     local entries = GetIncomingMenuEntries(zone)
-    incomingMenu:SetHeight((INCOMING_OPTION_HEIGHT * #entries) + (INCOMING_MENU_PADDING * 2))
+    local rowCount = 4
+    incomingMenu:SetHeight(
+        (INCOMING_MENU_PADDING * 2)
+        + INCOMING_MENU_HEADER_HEIGHT
+        + INCOMING_BUTTON_STYLE.headerGap
+        + (INCOMING_OPTION_HEIGHT * rowCount)
+        + (INCOMING_BUTTON_STYLE.rowGap * (rowCount - 1))
+    )
+    if zone and zone.isBase then
+        incomingMenuHeading:SetText(IsBaseHeldOrAssaultedByPlayerFaction(zone) and "INCOMING" or "VISIBLE")
+    else
+        incomingMenuHeading:SetText("VISIBLE")
+    end
 
     for i, option in ipairs(incomingMenuOptions) do
         local optionText = entries[i]
         if optionText then
             option.calloutText = optionText
-            option.label:SetText(optionText)
+            option.label:SetText(optionText == "Get OUT" and "OUT" or optionText)
+            option.label:SetFontObject(
+                (optionText == "Safe" or optionText == "Get OUT") and GameFontNormalSmall or GameFontNormal
+            )
+            local row = math.floor((i - 1) / 2)
+            local column = (i - 1) % 2
+            local availableWidth = INCOMING_MENU_WIDTH - (INCOMING_MENU_PADDING * 2)
+            local buttonWidth = (availableWidth - INCOMING_BUTTON_STYLE.columnGap) / 2
+            local xOffset = INCOMING_MENU_PADDING
+                + (column * (buttonWidth + INCOMING_BUTTON_STYLE.columnGap))
+            local yOffset = INCOMING_MENU_PADDING
+                + INCOMING_MENU_HEADER_HEIGHT
+                + INCOMING_BUTTON_STYLE.headerGap
+                + (row * (INCOMING_OPTION_HEIGHT + INCOMING_BUTTON_STYLE.rowGap))
+
+            option:ClearAllPoints()
+            option:SetPoint("TOPLEFT", incomingMenu, "TOPLEFT", xOffset, -yOffset)
+            option:SetSize(buttonWidth, INCOMING_OPTION_HEIGHT)
+            option:SetPressDepth(0)
             option:Show()
         else
             option.calloutText = nil
@@ -3310,63 +3960,132 @@ local function OpenIncomingMenu(zone, x, y)
     end
 
     incomingMenuZone = zone
-    hoveredZone = nil
-    ShowZone(zone)
+    if hoveredZone ~= zone or not hoveredAreaOverlay then ShowZone(zone) end
     GameTooltip:Hide()
     ConfigureIncomingMenu(zone)
-    AnchorIncomingMenu(x, y)
-    incomingMenuDismiss:Show()
+    AnchorIncomingMenu(zone)
+    incomingMenu.popElapsed = 0
     incomingMenu:Show()
+    incomingMenuDismiss:Show()
 end
 
 for i = 1, INCOMING_MENU_MAX_OPTIONS do
     local option = CreateFrame("Button", nil, incomingMenu)
-    option:SetHeight(INCOMING_OPTION_HEIGHT)
-    option:SetPoint(
-        "TOPLEFT",
-        incomingMenu,
-        "TOPLEFT",
-        INCOMING_MENU_PADDING,
-        -INCOMING_MENU_PADDING - ((i - 1) * INCOMING_OPTION_HEIGHT)
-    )
-    option:SetPoint(
-        "TOPRIGHT",
-        incomingMenu,
-        "TOPRIGHT",
-        -INCOMING_MENU_PADDING,
-        -INCOMING_MENU_PADDING - ((i - 1) * INCOMING_OPTION_HEIGHT)
-    )
+    option:SetSize(34, INCOMING_OPTION_HEIGHT)
+    option:SetFrameLevel(incomingMenu:GetFrameLevel() + 1)
 
-    local optionBG = option:CreateTexture(nil, "BACKGROUND")
-    optionBG:SetAllPoints()
-    optionBG:SetColorTexture(0.02, 0.02, 0.02, 0.72)
+    option.shadow = option:CreateTexture(nil, "BACKGROUND")
+    option.shadow:SetTexture("Interface\\Buttons\\WHITE8X8")
+    option.shadow:SetPoint("TOPLEFT", option, "TOPLEFT", 1, -2)
+    option.shadow:SetPoint("BOTTOMRIGHT", option, "BOTTOMRIGHT", -1, 0)
+    option.shadow:SetVertexColor(0, 0, 0, 0.82)
 
-    local optionHighlight = option:CreateTexture(nil, "HIGHLIGHT")
-    optionHighlight:SetAllPoints()
-    optionHighlight:SetColorTexture(0.85, 0.62, 0.08, 0.55)
+    option.face = CreateFrame("Button", nil, option, "UIPanelButtonTemplate")
+    option.face:SetFrameLevel(option:GetFrameLevel() + 1)
+    option.face:EnableMouse(false)
+    option.face:SetText("")
+    option.label = option.face:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    option.label:SetPoint("CENTER", option.face, "CENTER", 0, 0)
+    option.label:SetTextColor(1, 0.84, 0.30, 1)
+    local faceHighlight = option.face:GetHighlightTexture()
+    if faceHighlight then
+        faceHighlight:SetBlendMode("ADD")
+        faceHighlight:SetAlpha(0.72)
+    end
 
-    option.label = option:CreateFontString(nil, "OVERLAY")
-    option.label:SetPoint("CENTER")
-    option.label:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
-    option.label:SetTextColor(1, 0.88, 0.48, 1)
+    function option:SetPressDepth(depth)
+        depth = math.max(0, math.min(INCOMING_BUTTON_STYLE.pressDepth, tonumber(depth) or 0))
+        self.pressDepth = depth
+        self.face:ClearAllPoints()
+        self.face:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -depth)
+        self.face:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 0, 2 - depth)
+        self.face:SetButtonState(depth >= (INCOMING_BUTTON_STYLE.pressDepth * 0.42) and "PUSHED" or "NORMAL")
+        self.shadow:SetAlpha(0.82 * (1 - (0.78 * (depth / INCOMING_BUTTON_STYLE.pressDepth))))
+    end
+
+    function option:AnimatePressTo(target, duration, onFinished)
+        self.pressStart = self.pressDepth or 0
+        self.pressTarget = target
+        self.pressDuration = math.max(0.001, duration or INCOMING_BUTTON_STYLE.upSeconds)
+        self.pressElapsed = 0
+        self.pressFinished = onFinished
+    end
+
+    option:SetScript("OnUpdate", function(self, elapsed)
+        if self.pressElapsed == nil then return end
+        self.pressElapsed = self.pressElapsed + math.max(0, tonumber(elapsed) or 0)
+        local progress = math.min(1, self.pressElapsed / self.pressDuration)
+        local eased = 1 - ((1 - progress) ^ 3)
+        self:SetPressDepth(self.pressStart + ((self.pressTarget - self.pressStart) * eased))
+        if progress >= 1 then
+            self.pressElapsed = nil
+            local finished = self.pressFinished
+            self.pressFinished = nil
+            if finished then finished() end
+        end
+    end)
+
+    option:SetScript("OnEnter", function(self)
+        self.face:LockHighlight()
+    end)
+
+    option:SetScript("OnLeave", function(self)
+        self.face:UnlockHighlight()
+        if self.pressElapsed ~= nil and self.pressTarget == INCOMING_BUTTON_STYLE.pressDepth then
+            self:AnimatePressTo(0, INCOMING_BUTTON_STYLE.upSeconds)
+        end
+    end)
+
+    option:SetScript("OnMouseDown", function(self)
+        self:AnimatePressTo(INCOMING_BUTTON_STYLE.pressDepth, INCOMING_BUTTON_STYLE.downSeconds)
+    end)
+
+    option:SetScript("OnMouseUp", function(self)
+        self:AnimatePressTo(0, INCOMING_BUTTON_STYLE.upSeconds)
+    end)
+
+    option:SetScript("OnHide", function(self)
+        self.pressElapsed = nil
+        self.pressFinished = nil
+        self.reportPending = nil
+        self:SetPressDepth(0)
+        self.face:UnlockHighlight()
+    end)
 
     option:RegisterForClicks("LeftButtonUp")
     option:SetScript("OnClick", function(self)
+        if self.reportPending then return end
         local zone = incomingMenuZone
         local selection = self.calloutText
-        CloseIncomingMenu()
-        if zone and selection then
-            local message = FormatZoneCallout(zone, selection)
-            if message then
-                Report(message)
-            end
+        local message = zone and selection and FormatZoneCallout(zone, selection) or nil
+        if not message then
+            CloseIncomingMenu()
+            return
         end
+
+        -- Chat APIs must run inside the hardware-click handler. The visual
+        -- release may finish later, but the protected action cannot.
+        self.reportPending = true
+        Report(message)
+        self:AnimatePressTo(0, INCOMING_BUTTON_STYLE.upSeconds, function()
+            CloseIncomingMenu()
+        end)
     end)
 
     incomingMenuOptions[i] = option
 end
 
+map:SetScript("OnMouseDown", function(_, button)
+    if button == "LeftButton" and hoveredZone and hoveredAreaOverlay and not isMoving and not resizing then
+        hoveredAreaOverlay:SetInteractionPressed(true)
+    end
+end)
+
 map:SetScript("OnMouseUp", function(self, button)
+    if button == "LeftButton" and hoveredAreaOverlay then
+        hoveredAreaOverlay:SetInteractionPressed(false)
+    end
+
     if mapDragStarted then
         mapDragStarted = false
         return
@@ -3432,6 +4151,8 @@ end)
 frame:HookScript("OnHide", CloseIncomingMenu)
 
 map:SetScript("OnUpdate", function(self, elapsed)
+    highlightTexture:UpdateInteractionAnimation(elapsed)
+
     if ZurkMapsOptions and ZurkMapsOptions.menu and ZurkMapsOptions.menu:IsShown() then
         return
     end
@@ -3487,7 +4208,8 @@ end)
 
 map:SetScript("OnLeave", function()
     ClearFriendlyPlayerTooltip()
-    if not isMoving and not resizing and not hoveredBaseNode and not hoveredContestTimerFrame then
+    if not isMoving and not resizing and not hoveredBaseNode and not hoveredContestTimerFrame
+        and not (incomingMenu and incomingMenu:IsShown()) then
         ShowZone(nil)
     end
 end)
@@ -3558,7 +4280,7 @@ local function PrintABOptions()
     print("|cffffff00/ab show|r - Show Zurk Maps.")
     print("|cffffff00/ab hide|r - Hide Zurk Maps.")
     print("|cffffff00/ab reset|r - Reset saved position and size.")
-    print("Base hotspots: Safe + 1+ to 7+. Other hotspots: 1+ to 4+ + Get OUT.")
+    print("Hotspot menus: 1+ to 7+, plus Safe for bases or Get OUT elsewhere.")
     print("Base nodes: left-click SPIN, right-click HELP, Shift-click weak.")
     print("|cffffff00/ab testcontest ST ally 60|r - Preview one contested hotspot animation/timer.")
     print("|cffffff00/ab test|r - Show 15 moving gold friendly blips plus assaults that resolve into full control.")

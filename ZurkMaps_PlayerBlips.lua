@@ -4,6 +4,7 @@ ZurkMapsPlayerBlips = ZurkMapsPlayerBlips or {}
 
 local PlayerBlips = ZurkMapsPlayerBlips
 local CLASS_BLIP_TEXTURE = "Interface\\AddOns\\ZurkMaps\\Media\\ClassPlayerDot"
+local RANK_SHADOW_TEXTURE_FORMAT = "Interface\\AddOns\\ZurkMaps\\Media\\RankBadgeShadows\\Rank%d"
 
 -- Approved rounded version remains saved as Media/ClassPlayerOrb.tga.
 local CLASS_ORB_TEXTURE = "Interface\\AddOns\\ZurkMaps\\Media\\ClassPlayerWarcraft"
@@ -33,6 +34,16 @@ local FEATURED_TITLE_PREFIXES = {
     { "General ", 12 },
 }
 
+-- Rank badges are tiny, detailed textures that move continuously. Blizzard's
+-- default texel snapping can make their outline alternate between neighboring
+-- pixels as the parent frame crosses subpixels, which reads as blur/shimmer.
+function PlayerBlips.ConfigureMovingTexture(texture)
+    if not texture then return end
+    if texture.SetSnapToPixelGrid then texture:SetSnapToPixelGrid(false) end
+    if texture.SetTexelSnappingBias then texture:SetTexelSnappingBias(0) end
+    if texture.SetFilterMode then pcall(texture.SetFilterMode, texture, "LINEAR") end
+end
+
 function PlayerBlips.GetClassColor(unit, fallbackColors)
     local _, classToken = UnitClass(unit)
     if not classToken then
@@ -56,6 +67,15 @@ function PlayerBlips.GetDotSize(baseSize, addonFrame)
     local addonScale = (addonFrame and addonFrame.GetScale and addonFrame:GetScale()) or 1
     local compensationScale = math.min(addonScale, 1)
     return baseSize / compensationScale
+end
+
+-- Helmet badges use one AB-sized footprint everywhere. Below 100% map scale,
+-- compensate so they retain that readable screen footprint; above 100%, normal
+-- parent scaling lets them grow with the dragged map.
+function PlayerBlips.GetRankBadgeSize(baseSize, iconScale, addonFrame)
+    local logicalSize = (tonumber(baseSize) or 12.5) * (tonumber(iconScale) or 0.924)
+    local addonScale = (addonFrame and addonFrame.GetScale and addonFrame:GetScale()) or 1
+    return logicalSize / math.min(math.max(addonScale, 0.01), 1)
 end
 
 -- Neutral bright artwork retains the class hue while a raised rim and shaded
@@ -89,6 +109,10 @@ function PlayerBlips.GetRankBadgeTexture(rankNumber, classToken)
     return string.format("Interface\\PvPRankBadges\\PvPRank%02d", rankNumber)
 end
 
+function PlayerBlips.GetRankBadgeShadowTexture(rankNumber)
+    return string.format(RANK_SHADOW_TEXTURE_FORMAT, rankNumber)
+end
+
 function PlayerBlips.ApplyRankBadge(blip, rankNumber, size, classToken)
     if not blip or not rankNumber then
         return
@@ -99,11 +123,22 @@ function PlayerBlips.ApplyRankBadge(blip, rankNumber, size, classToken)
     if ZurkMapsPlayerIcons and ZurkMapsPlayerIcons.HideEliteOverlay then
         ZurkMapsPlayerIcons.HideEliteOverlay(blip)
     end
+    -- The shadow is built from this rank's own silhouette. It is softly offset
+    -- inside the texture, so R12/R13 retain their shapes instead of acquiring
+    -- the circular outline associated with R14.
     if blip.shadow then
-        blip.shadow:SetTexture(rankTexture)
+        PlayerBlips.ConfigureMovingTexture(blip.shadow)
+        blip.shadow:ClearAllPoints()
+        blip.shadow:SetPoint("TOPLEFT", blip, "TOPLEFT", -1, 1)
+        blip.shadow:SetPoint("BOTTOMRIGHT", blip, "BOTTOMRIGHT", 1, -1)
+        blip.shadow:SetTexture(PlayerBlips.GetRankBadgeShadowTexture(rankNumber))
+        blip.shadow:SetTexCoord(0, 1, 0, 1)
+        blip.shadow:SetVertexColor(0, 0, 0, 0.92)
+        if blip.shadow.SetBlendMode then blip.shadow:SetBlendMode("BLEND") end
         blip.shadow:Show()
     end
     if blip.texture then
+        PlayerBlips.ConfigureMovingTexture(blip.texture)
         blip.texture:SetTexture(rankTexture)
         blip.texture:SetTexCoord(0, 1, 0, 1)
         blip.texture:SetVertexColor(1, 1, 1, 1)
@@ -134,6 +169,7 @@ function PlayerBlips.CreateRankController(config)
         min = config.min or 12,
         max = config.max or 14,
         iconScale = config.iconScale or 0.924,
+        rankBaseSize = config.rankBaseSize or 12.5,
         cache = {},
         knownRanks = {},
         blips = {},
@@ -704,10 +740,18 @@ function PlayerBlips.CreateRankController(config)
         local rankNumber = controller.GetRankNumber(unit)
         if rankNumber then
             local _, classToken = UnitClass(unit)
-            return PlayerBlips.GetRankBadgeTexture(rankNumber, classToken), dotSize * controller.iconScale, nil, rankNumber
+            local addonFrame = config.getAddonFrame and config.getAddonFrame() or nil
+            return PlayerBlips.GetRankBadgeTexture(rankNumber, classToken),
+                PlayerBlips.GetRankBadgeSize(controller.rankBaseSize, controller.iconScale, addonFrame), nil, rankNumber
         end
         if UseClassBlips() then return CLASS_ORB_TEXTURE, dotSize, nil, nil end
         return nil, nil, nil, nil
+    end
+
+
+    function controller.GetRankBadgeSize()
+        local addonFrame = config.getAddonFrame and config.getAddonFrame() or nil
+        return PlayerBlips.GetRankBadgeSize(controller.rankBaseSize, controller.iconScale, addonFrame)
     end
 
     function controller.GetOrCreateEliteOverlay(unit)
@@ -806,6 +850,7 @@ function PlayerBlips.CreateRankController(config)
         local added = 0
         local eliteAdded = 0
         local specialAdded = 0
+        local shadowAdded = 0
         for _, unit in ipairs(units) do
             if UnitExists(unit) and ShouldIncludeUnit(unit) then
                 local guid = UnitGUID(unit)
@@ -835,7 +880,15 @@ function PlayerBlips.CreateRankController(config)
                             pcall(special.AddUnit, special, unit, texture, size, size, r, g, b, 1, 1, false)
                             specialAdded = specialAdded + 1
                         else
-                            pcall(shadow.AddUnit, shadow, unit, texture, size + 2, size + 2, 0, 0, 0, 0.72, 0, false)
+                            if rankNumber then
+                                pcall(shadow.AddUnit, shadow, unit,
+                                    PlayerBlips.GetRankBadgeShadowTexture(rankNumber),
+                                    size + 2, size + 2, 0, 0, 0, 0.92, 0, false)
+                                shadowAdded = shadowAdded + 1
+                            else
+                                pcall(shadow.AddUnit, shadow, unit, texture, size + 2, size + 2, 0, 0, 0, 0.72, 0, false)
+                                shadowAdded = shadowAdded + 1
+                            end
                             pcall(special.AddUnit, special, unit, texture, size, size, 1, 1, 1, 1, 1, false)
                             specialAdded = specialAdded + 1
                         end
@@ -849,7 +902,7 @@ function PlayerBlips.CreateRankController(config)
         pcall(special.FinalizeUnits, special)
         pcall(eliteBase.FinalizeUnits, eliteBase)
         pcall(elite.FinalizeUnits, elite)
-        shadow:SetShown(specialAdded > 0)
+        shadow:SetShown(shadowAdded > 0)
         special:SetShown(specialAdded > 0)
         eliteBase:SetShown(eliteAdded > 0)
         elite:SetShown(eliteAdded > 0)
