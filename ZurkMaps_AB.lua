@@ -562,11 +562,11 @@ local function FormatZoneCallout(zone, dropdownSelection)
     local location = zone.calloutLocation or zone.name
 
     if zone.calloutStyle == "at" then
-        return dropdownSelection .. " " .. enemyFaction .. " at " .. location .. "!"
+        return dropdownSelection .. " " .. enemyFaction .. " at " .. location
     elseif zone.calloutStyle == "road_spotted" then
-        return dropdownSelection .. " " .. enemyFaction .. " spotted on the " .. location .. "!"
+        return dropdownSelection .. " " .. enemyFaction .. " spotted on the " .. location
     elseif zone.isBase and not IsBaseHeldOrAssaultedByPlayerFaction(zone) then
-        return dropdownSelection .. " " .. enemyFaction .. " visible at " .. location .. "!"
+        return dropdownSelection .. " " .. enemyFaction .. " visible at " .. location
     end
 
     return dropdownSelection .. " " .. enemyFaction .. " incoming " .. location .. "!"
@@ -616,6 +616,1447 @@ mapBorder:SetFrameLevel(map:GetFrameLevel() + 10)
 -- setting controlling transparency and hard clipping containing the overscan.
 map.interiorMask = ZurkMapsInteriorMask.Create(map, mapBorder, 3, 4, true)
 ZurkMapsInteriorMask.Apply(map.interiorMask, mapTexture)
+
+
+do
+-- Arathi Basin game-pace timer. The resource-rate table and score-widget parsing
+-- are adapted from Capping's Classic AB estimator, but all state is owned by
+-- Zurk Maps and named for this map. The widget does not appear until a base is
+-- fully controlled, then slides down from a clipped position beneath the header.
+local AB_WIN_TIMER_MAX_SCORE = 2000
+local AB_WIN_TIMER_ALLIANCE_WIDGET_ID = 1893
+local AB_WIN_TIMER_HORDE_WIDGET_ID = 1894
+local AB_WIN_TIMER_SCORE_PER_SECOND = {
+    [1] = 0.8333,
+    [2] = 1.1111,
+    [3] = 1.6667,
+    [4] = 3.3333,
+    [5] = 30,
+}
+local AB_WIN_TIMER_WIDTH = 202
+local AB_WIN_TIMER_HEIGHT = 30
+local AB_WIN_TIMER_FILL_HEIGHT = 10
+local AB_WIN_TIMER_ICON_GUTTER = 54
+local AB_WIN_TIMER_MASK_HEIGHT = 34
+local AB_WIN_TIMER_START_Y = 30
+local AB_WIN_TIMER_TARGET_Y = -1
+local AB_WIN_TIMER_SLIDE_SECONDS = 0.38
+local AB_WIN_TIMER_GLOW_SECONDS = 0.82
+local AB_WIN_TIMER_ICON_GLOW_FADE_SECONDS = 0.42
+local AB_WIN_TIMER_LIVE_POLL_SECONDS = 0.15
+local AB_WIN_TIMER_TIE_EPSILON = 0.10
+local AB_WIN_TIMER_INFINITY = 1000000
+
+-- The 5-base crawl uses one synchronized IconAlertAnts animation split across
+-- three geometry regions: a wide top/bottom band and two square end-cap fields.
+-- A single extremely wide, shallow action-button sprite left permanent dead
+-- areas on the side centers and forced the side rays to share the same allowance
+-- as the top/bottom rays. Keep r65's accepted vertical reach, but make the side
+-- allowance independently much tighter.
+local AB_WIN_TIMER_CRAWL_INNER_WIDTH_PAD = 2.0
+local AB_WIN_TIMER_CRAWL_INNER_HEIGHT_TRIM = 2.0
+local AB_WIN_TIMER_CRAWL_VERTICAL_OUTSET = 6.0
+local AB_WIN_TIMER_CRAWL_SIDE_OUTSET = 1.25
+local AB_WIN_TIMER_CRAWL_BAND_OVERLAP = 0.50
+local AB_WIN_TIMER_FACTION_COLOR = {
+    Alliance = { 0.12, 0.46, 1.00 },
+    Horde = { 0.96, 0.16, 0.10 },
+}
+
+-- Horde's 4-base pace glow should read as clearly red, not orange or gray.
+-- Keep the same geometry, but use stacked red-only tints with a mild overall
+-- alpha boost so the Horde pace glow stays visible.
+local AB_WIN_TIMER_HORDE_PACE_GLOW_COLOR = { 1.00, 0.00, 0.00 }
+local AB_WIN_TIMER_HORDE_PACE_GLOW_ALPHA_MULT = 1.25
+local AB_WIN_TIMER_HORDE_PACE_GLOW_HOT_COLOR = { 1.00, 0.15, 0.12 }
+local AB_WIN_TIMER_HORDE_PACE_GLOW_LEFT_INSET = 6
+local AB_WIN_TIMER_HORDE_PACE_GLOW_RIGHT_INSET = 6
+local AB_WIN_TIMER_HORDE_PACE_GLOW_TOP_INSET = 1
+local AB_WIN_TIMER_HORDE_PACE_GLOW_BOTTOM_INSET = 1
+local AB_WIN_TIMER_HORDE_PACE_GLOW_X_OFFSET = 2
+
+local function ABWinTimerNow()
+    return type(GetTime) == "function" and GetTime() or 0
+end
+
+local function ApplyABWinTimerAtlas(texture, atlasChoices)
+    if not texture or type(texture.SetAtlas) ~= "function" then return nil end
+    for _, atlasName in ipairs(atlasChoices or {}) do
+        local atlasExists = true
+        if C_Texture and type(C_Texture.GetAtlasInfo) == "function" then
+            local infoOK, atlasInfo = pcall(C_Texture.GetAtlasInfo, atlasName)
+            atlasExists = infoOK and atlasInfo ~= nil
+        end
+        if atlasExists then
+            local ok = pcall(texture.SetAtlas, texture, atlasName, false)
+            if ok then return atlasName end
+        end
+    end
+    return nil
+end
+
+local abWinTimerMask = CreateFrame("Frame", nil, map)
+abWinTimerMask:SetSize(AB_WIN_TIMER_WIDTH + 12, AB_WIN_TIMER_MASK_HEIGHT)
+abWinTimerMask:SetPoint("TOP", map, "TOP", 0, 0)
+abWinTimerMask:SetFrameLevel(mapBorder:GetFrameLevel() + 8)
+abWinTimerMask:EnableMouse(false)
+if abWinTimerMask.SetClipsChildren then
+    abWinTimerMask:SetClipsChildren(true)
+end
+
+local abWinTimerWidget = CreateFrame("Frame", nil, abWinTimerMask)
+abWinTimerWidget:SetSize(AB_WIN_TIMER_WIDTH, AB_WIN_TIMER_HEIGHT)
+abWinTimerWidget:SetPoint("TOP", abWinTimerMask, "TOP", 0, AB_WIN_TIMER_START_Y)
+abWinTimerWidget:SetFrameLevel(abWinTimerMask:GetFrameLevel() + 1)
+abWinTimerWidget:EnableMouse(false)
+abWinTimerWidget:Hide()
+
+abWinTimerWidget.frameTexture = abWinTimerWidget:CreateTexture(nil, "ARTWORK")
+abWinTimerWidget.frameTexture:SetAllPoints()
+ApplyABWinTimerAtlas(abWinTimerWidget.frameTexture, {
+    "worldstate-capturebar-frame-factions",
+    "worldstate-capturebar-frame",
+})
+
+local abWinTimerTrackWidth = math.max(1, (AB_WIN_TIMER_WIDTH - AB_WIN_TIMER_ICON_GUTTER) + 12)
+local abWinTimerIconCenterOffset = math.floor((AB_WIN_TIMER_WIDTH * 0.5) - ((AB_WIN_TIMER_ICON_GUTTER * 0.5) * 0.5))
+
+abWinTimerWidget.trackFrame = CreateFrame("Frame", nil, abWinTimerWidget)
+abWinTimerWidget.trackFrame:SetSize(abWinTimerTrackWidth, AB_WIN_TIMER_FILL_HEIGHT)
+abWinTimerWidget.trackFrame:SetPoint("CENTER", abWinTimerWidget, "CENTER", 0, 0)
+abWinTimerWidget.trackFrame:SetFrameLevel(math.max(1, abWinTimerWidget:GetFrameLevel() - 1))
+abWinTimerWidget.trackFrame:EnableMouse(false)
+
+abWinTimerWidget.backgroundFill = abWinTimerWidget.trackFrame:CreateTexture(nil, "BACKGROUND")
+abWinTimerWidget.backgroundFill:SetAllPoints()
+local abBackgroundAtlas = ApplyABWinTimerAtlas(abWinTimerWidget.backgroundFill, {
+    "worldstate-capturebar-gray",
+})
+if abBackgroundAtlas ~= "worldstate-capturebar-gray" then
+    abWinTimerWidget.backgroundFill:SetColorTexture(0.12, 0.12, 0.12, 0.95)
+else
+    abWinTimerWidget.backgroundFill:SetVertexColor(1, 1, 1, 0.96)
+end
+
+abWinTimerWidget.allianceFill = abWinTimerWidget.trackFrame:CreateTexture(nil, "ARTWORK")
+abWinTimerWidget.allianceFill:SetHeight(AB_WIN_TIMER_FILL_HEIGHT)
+abWinTimerWidget.allianceFill:SetPoint("RIGHT", abWinTimerWidget.trackFrame, "RIGHT", 0, 0)
+local abAllianceFillAtlas = ApplyABWinTimerAtlas(abWinTimerWidget.allianceFill, {
+    "worldstate-capturebar-leftfill-factions",
+    "worldstate-capturebar-blue",
+})
+if abAllianceFillAtlas ~= "worldstate-capturebar-leftfill-factions" then
+    local color = AB_WIN_TIMER_FACTION_COLOR.Alliance
+    abWinTimerWidget.allianceFill:SetVertexColor(color[1], color[2], color[3], 1)
+end
+abWinTimerWidget.allianceFill:Hide()
+
+abWinTimerWidget.hordeFill = abWinTimerWidget.trackFrame:CreateTexture(nil, "ARTWORK")
+abWinTimerWidget.hordeFill:SetHeight(AB_WIN_TIMER_FILL_HEIGHT)
+abWinTimerWidget.hordeFill:SetPoint("LEFT", abWinTimerWidget.trackFrame, "LEFT", 0, 0)
+local abHordeFillAtlas = ApplyABWinTimerAtlas(abWinTimerWidget.hordeFill, {
+    "worldstate-capturebar-rightfill-factions",
+    "worldstate-capturebar-red",
+})
+if abHordeFillAtlas ~= "worldstate-capturebar-rightfill-factions" then
+    local color = AB_WIN_TIMER_FACTION_COLOR.Horde
+    abWinTimerWidget.hordeFill:SetVertexColor(color[1], color[2], color[3], 1)
+end
+abWinTimerWidget.hordeFill:Hide()
+
+abWinTimerWidget.glowFrame = CreateFrame("Frame", nil, abWinTimerWidget)
+abWinTimerWidget.glowFrame:SetFrameLevel(abWinTimerWidget:GetFrameLevel() + 2)
+abWinTimerWidget.glowFrame:SetSize(abWinTimerTrackWidth + 2, AB_WIN_TIMER_FILL_HEIGHT + 12)
+abWinTimerWidget.glowFrame:SetPoint("CENTER", abWinTimerWidget.trackFrame, "CENTER", 0, 0)
+abWinTimerWidget.glowFrame:EnableMouse(false)
+abWinTimerWidget.glowFrame:Hide()
+
+-- Pace glows: Alliance uses the fitted neutral glow texture. Horde uses the
+-- boss capturebar glow asset requested by the user, stacked in the same fitted
+-- geometry so it reads strongly and clearly red.
+local function CreateABWinTimerPaceGlowTexture(faction, vertexColor, baseAlpha, atlasChoices)
+    local texture = abWinTimerWidget.glowFrame:CreateTexture(nil, "OVERLAY")
+    texture:SetAllPoints()
+    texture:SetBlendMode("ADD")
+
+    local used = ApplyABWinTimerAtlas(texture, atlasChoices or {
+        "worldstate-capturebar-neutralglow-bastionarmor",
+        "worldstate-capturebar-glow",
+    })
+    if not used then
+        texture:SetTexture("Interface\Buttons\WHITE8X8")
+    end
+
+    if texture.SetDesaturated then pcall(texture.SetDesaturated, texture, false) end
+    if vertexColor then
+        texture:SetVertexColor(vertexColor[1], vertexColor[2], vertexColor[3], 1)
+    else
+        texture:SetVertexColor(1, 1, 1, 1)
+    end
+    texture:SetAlpha(baseAlpha or 1)
+    texture:Hide()
+    return texture
+end
+
+abWinTimerWidget.allianceGlow = CreateABWinTimerPaceGlowTexture("Alliance", nil, 1, {
+    "worldstate-capturebar-neutralglow-bastionarmor",
+    "worldstate-capturebar-glow",
+})
+abWinTimerWidget.hordeGlow = CreateABWinTimerPaceGlowTexture("Horde", AB_WIN_TIMER_HORDE_PACE_GLOW_COLOR, 1, {
+    "worldstate-capturebar-leftglow-boss",
+    "worldstate-capturebar-glow",
+    "worldstate-capturebar-neutralglow-bastionarmor",
+})
+abWinTimerWidget.hordeGlowHot = CreateABWinTimerPaceGlowTexture("Horde", AB_WIN_TIMER_HORDE_PACE_GLOW_HOT_COLOR, 0.72, {
+    "worldstate-capturebar-leftglow-boss",
+    "worldstate-capturebar-glow",
+    "worldstate-capturebar-neutralglow-bastionarmor",
+})
+
+-- The boss glow atlas reads well for Horde, but it does not naturally fit
+-- the capturebar geometry when stretched like Alliance's neutral glow. Give
+-- it its own fitted bounds so the red pace glow hugs the pill more closely,
+-- especially at the right end.
+local function InsetABWinTimerHordePaceGlow(texture)
+    if not texture then return end
+    texture:ClearAllPoints()
+    texture:SetPoint("TOPLEFT", abWinTimerWidget.glowFrame, "TOPLEFT", AB_WIN_TIMER_HORDE_PACE_GLOW_LEFT_INSET + AB_WIN_TIMER_HORDE_PACE_GLOW_X_OFFSET, -AB_WIN_TIMER_HORDE_PACE_GLOW_TOP_INSET)
+    texture:SetPoint("BOTTOMRIGHT", abWinTimerWidget.glowFrame, "BOTTOMRIGHT", -AB_WIN_TIMER_HORDE_PACE_GLOW_RIGHT_INSET + AB_WIN_TIMER_HORDE_PACE_GLOW_X_OFFSET, AB_WIN_TIMER_HORDE_PACE_GLOW_BOTTOM_INSET)
+end
+
+InsetABWinTimerHordePaceGlow(abWinTimerWidget.hordeGlow)
+InsetABWinTimerHordePaceGlow(abWinTimerWidget.hordeGlowHot)
+
+-- Compatibility alias for any out-of-scope code that still expects .glow.
+abWinTimerWidget.glow = abWinTimerWidget.allianceGlow
+
+-- Icon glow clip deliberately clips only at the top map boundary.  Give the
+-- clip lots of room on the left/right/bottom so rays are never boxed in there.
+abWinTimerWidget.iconGlowClip = CreateFrame("Frame", nil, abWinTimerMask)
+abWinTimerWidget.iconGlowClip:ClearAllPoints()
+abWinTimerWidget.iconGlowClip:SetPoint("TOPLEFT", abWinTimerMask, "TOPLEFT", -90, 0)
+abWinTimerWidget.iconGlowClip:SetPoint("BOTTOMRIGHT", abWinTimerMask, "BOTTOMRIGHT", 90, -70)
+abWinTimerWidget.iconGlowClip:SetFrameLevel(math.max(1, abWinTimerWidget:GetFrameLevel() - 1))
+abWinTimerWidget.iconGlowClip:EnableMouse(false)
+if abWinTimerWidget.iconGlowClip.SetClipsChildren then
+    abWinTimerWidget.iconGlowClip:SetClipsChildren(true)
+end
+
+local function CreateABWinTimerIconGlow(parent, xOffset)
+    local holder = CreateFrame("Frame", nil, parent)
+    holder:SetSize(66, 66)
+    holder:SetPoint("CENTER", abWinTimerWidget, "CENTER", xOffset, 0)
+    holder:SetFrameLevel(parent:GetFrameLevel())
+    holder:EnableMouse(false)
+    holder:Hide()
+    holder.elapsed = 0
+    holder.progress = 0
+    holder.fadeAlpha = 0
+    holder.fadeTarget = 0
+    holder:SetAlpha(0)
+
+    holder.rearStar = holder:CreateTexture(nil, "ARTWORK", nil, -2)
+    holder.rearStar:SetPoint("CENTER")
+    holder.rearStar:SetTexture("Interface\\Cooldown\\star4")
+    holder.rearStar:SetBlendMode("ADD")
+    holder.rearStar:SetVertexColor(1.00, 0.72, 0.04, 1)
+
+    holder.innerStar = holder:CreateTexture(nil, "ARTWORK", nil, -1)
+    holder.innerStar:SetPoint("CENTER")
+    holder.innerStar:SetTexture("Interface\\Cooldown\\star4")
+    holder.innerStar:SetBlendMode("ADD")
+    holder.innerStar:SetVertexColor(1.00, 0.96, 0.56, 1)
+
+    holder.rays01 = holder:CreateTexture(nil, "ARTWORK", nil, 0)
+    holder.rays01:SetPoint("CENTER")
+    holder.rays01:SetBlendMode("ADD")
+    ApplyABWinTimerAtlas(holder.rays01, { "shop-toast-token-rays01" })
+    holder.rays01:SetVertexColor(1.00, 0.84, 0.18, 1)
+    holder.rays01:Hide()
+
+    holder.rays02 = holder:CreateTexture(nil, "ARTWORK", nil, 1)
+    holder.rays02:SetPoint("CENTER")
+    holder.rays02:SetBlendMode("ADD")
+    ApplyABWinTimerAtlas(holder.rays02, { "shop-toast-token-rays02" })
+    holder.rays02:SetVertexColor(1.00, 0.94, 0.46, 1)
+    holder.rays02:Hide()
+
+    return holder
+end
+
+abWinTimerWidget.allianceIconGlow = CreateABWinTimerIconGlow(abWinTimerWidget.iconGlowClip, -abWinTimerIconCenterOffset)
+abWinTimerWidget.hordeIconGlow = CreateABWinTimerIconGlow(abWinTimerWidget.iconGlowClip, abWinTimerIconCenterOffset)
+
+local function SetABWinTimerIconGlowActive(glow, active, progress)
+    if not glow then return end
+    if active then
+        glow.progress = math.max(0, math.min(1, tonumber(progress) or 0))
+        glow.fadeTarget = 1
+        if not glow:IsShown() then
+            glow.fadeAlpha = 0
+            glow:SetAlpha(0)
+            glow:Show()
+        end
+    else
+        glow.progress = 0
+        glow.fadeTarget = 0
+        if glow.fadeAlpha == nil then
+            glow.fadeAlpha = glow:IsShown() and 1 or 0
+        end
+    end
+end
+
+-- 5-base intensity effect: use the WeakAuras Beams picker textures as the
+-- fill itself. WeakAuras stores these entries as numeric-string Blizzard
+-- texture IDs, so load them the same way WeakAuras does. The texture remains
+-- full-scale; progress reveals more of it from the faction-specific side.
+local AB_WIN_TIMER_5BASE_HORDE_BEAM = "186201" -- Red Lightning
+local AB_WIN_TIMER_5BASE_ALLIANCE_BEAM = "186211" -- Shock Lightning
+local AB_WIN_TIMER_5BASE_BEAM_HEIGHT = AB_WIN_TIMER_FILL_HEIGHT + 8
+local AB_WIN_TIMER_5BASE_BEAM_EDGE_INSET = 0
+local AB_WIN_TIMER_5BASE_BEAM_TEXCOORD_TRIM = 0.085
+local AB_WIN_TIMER_5BASE_BORDER_TEXCOORD_TRIM = 0.12
+local AB_WIN_TIMER_5BASE_BORDER_SHIFT = 0.04
+local AB_WIN_TIMER_PROGRESS_SPARK_TEXTURE = "Interface\\CastingBar\\UI-CastingBar-Spark"
+local AB_WIN_TIMER_PROGRESS_SPARK_WIDTH = 10
+local AB_WIN_TIMER_PROGRESS_SPARK_HEIGHT = AB_WIN_TIMER_FILL_HEIGHT + 16
+local AB_WIN_TIMER_PROGRESS_SPARK_FADE_SECONDS = 0.55
+local AB_WIN_TIMER_PROGRESS_SPARK_HORDE_X_OFFSET = 0
+local AB_WIN_TIMER_PROGRESS_SPARK_ALLIANCE_X_OFFSET = 0
+
+local function SetABWinTimerBeamTexture(texture, textureRef)
+    if not texture then return false end
+    local ok = texture:SetTexture(textureRef, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    if not ok then
+        local numericRef = tonumber(textureRef)
+        if numericRef then
+            ok = texture:SetTexture(numericRef, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        end
+    end
+    return ok
+end
+
+local function CreateABWinTimerFiveBaseBeam(textureRef, subLevel)
+    -- Put the beam directly on trackFrame: above the normal fill textures, but
+    -- below the timer text because trackFrame is one frame level below widget.
+    local texture = abWinTimerWidget.trackFrame:CreateTexture(nil, "ARTWORK", nil, subLevel or 2)
+    texture:SetHeight(AB_WIN_TIMER_5BASE_BEAM_HEIGHT)
+    texture:SetBlendMode("BLEND")
+    SetABWinTimerBeamTexture(texture, textureRef)
+
+    local mask = nil
+    if abWinTimerWidget.trackFrame.CreateMaskTexture and texture.AddMaskTexture then
+        mask = abWinTimerWidget.trackFrame:CreateMaskTexture(nil, "ARTWORK")
+        mask:SetAllPoints(abWinTimerWidget.trackFrame)
+        mask:SetTexture("Interface\\AddOns\\ZurkMaps\\Media\\ABFiveBaseBeamMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        if mask.SetSnapToPixelGrid then mask:SetSnapToPixelGrid(false) end
+        if mask.SetTexelSnappingBias then mask:SetTexelSnappingBias(0) end
+        texture:AddMaskTexture(mask)
+    end
+
+    texture:Hide()
+    return texture, mask
+end
+
+abWinTimerWidget.hordeFiveBaseBeam, abWinTimerWidget.hordeFiveBaseMask =
+    CreateABWinTimerFiveBaseBeam(AB_WIN_TIMER_5BASE_HORDE_BEAM, 2)
+abWinTimerWidget.hordeFiveBaseBeamHot = abWinTimerWidget.trackFrame:CreateTexture(nil, "ARTWORK", nil, 3)
+abWinTimerWidget.hordeFiveBaseBeamHot:SetHeight(AB_WIN_TIMER_5BASE_BEAM_HEIGHT)
+abWinTimerWidget.hordeFiveBaseBeamHot:SetBlendMode("ADD")
+SetABWinTimerBeamTexture(abWinTimerWidget.hordeFiveBaseBeamHot, AB_WIN_TIMER_5BASE_HORDE_BEAM)
+if abWinTimerWidget.hordeFiveBaseMask and abWinTimerWidget.hordeFiveBaseBeamHot.AddMaskTexture then
+    abWinTimerWidget.hordeFiveBaseBeamHot:AddMaskTexture(abWinTimerWidget.hordeFiveBaseMask)
+end
+abWinTimerWidget.hordeFiveBaseBeamHot:Hide()
+
+abWinTimerWidget.allianceFiveBaseBeam, abWinTimerWidget.allianceFiveBaseMask =
+    CreateABWinTimerFiveBaseBeam(AB_WIN_TIMER_5BASE_ALLIANCE_BEAM, 2)
+abWinTimerWidget.allianceFiveBaseBeamHot = abWinTimerWidget.trackFrame:CreateTexture(nil, "ARTWORK", nil, 3)
+abWinTimerWidget.allianceFiveBaseBeamHot:SetHeight(AB_WIN_TIMER_5BASE_BEAM_HEIGHT)
+abWinTimerWidget.allianceFiveBaseBeamHot:SetBlendMode("ADD")
+SetABWinTimerBeamTexture(abWinTimerWidget.allianceFiveBaseBeamHot, AB_WIN_TIMER_5BASE_ALLIANCE_BEAM)
+if abWinTimerWidget.allianceFiveBaseMask and abWinTimerWidget.allianceFiveBaseBeamHot.AddMaskTexture then
+    abWinTimerWidget.allianceFiveBaseBeamHot:AddMaskTexture(abWinTimerWidget.allianceFiveBaseMask)
+end
+abWinTimerWidget.allianceFiveBaseBeamHot:Hide()
+
+local function HideABWinTimerFiveBaseBeams()
+    abWinTimerWidget.hordeFiveBaseBeam:Hide()
+    abWinTimerWidget.hordeFiveBaseBeamHot:Hide()
+    abWinTimerWidget.allianceFiveBaseBeam:Hide()
+    abWinTimerWidget.allianceFiveBaseBeamHot:Hide()
+end
+
+-- 5-base crackling electricity arc effect.
+-- Source credit: Jordan Irwin (AntumDeluge), "Electricity Overlay Effect",
+-- OpenGameArt.org. Licensed under CC BY 4.0 / OGA BY. The original red and
+-- blue 48x64 frame strips are repacked into local 512x512 TGA atlases for WoW.
+local AB_WIN_TIMER_CRACKLE_FRAME_COUNT = 15
+local AB_WIN_TIMER_CRACKLE_COLUMNS = 4
+local AB_WIN_TIMER_CRACKLE_ROWS = 4
+local AB_WIN_TIMER_CRACKLE_FRAME_SECONDS = 0.060
+local AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_HEIGHT = 14
+local AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_HEIGHT = 10
+local AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_Y = 1.5
+local AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_Y = -1.5
+local AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_ORIGIN_INSET = 8
+local AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_MAX_WIDTH = 108
+local AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_MAX_WIDTH = 84
+local AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_INSET = 6
+local AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_DELAY = 26
+local AB_WIN_TIMER_5BASE_POWERDOWN_SECONDS = 0.55
+local AB_WIN_TIMER_5BASE_CRACKLE_POWERDOWN_SECONDS = 0.30
+
+abWinTimerWidget.fiveBaseBorderFrame = CreateFrame("Frame", nil, abWinTimerWidget)
+abWinTimerWidget.fiveBaseBorderFrame:SetFrameLevel(abWinTimerWidget:GetFrameLevel() + 2)
+abWinTimerWidget.fiveBaseBorderFrame:SetSize(abWinTimerTrackWidth + 2, AB_WIN_TIMER_FILL_HEIGHT + 12)
+abWinTimerWidget.fiveBaseBorderFrame:SetPoint("CENTER", abWinTimerWidget.trackFrame, "CENTER", 0, 0)
+abWinTimerWidget.fiveBaseBorderFrame:EnableMouse(false)
+abWinTimerWidget.fiveBaseBorderFrame:Hide()
+
+local function CreateABWinTimerCrackleArcTexture(texturePath, subLevel, mask)
+    local texture = abWinTimerWidget.trackFrame:CreateTexture(nil, "ARTWORK", nil, subLevel or 4)
+    texture:SetTexture(texturePath)
+    texture:SetBlendMode("ADD")
+    if mask and texture.AddMaskTexture then
+        texture:AddMaskTexture(mask)
+    end
+    texture:Hide()
+    return texture
+end
+
+local function CreateABWinTimerCrackleArcSet(texturePath, mask)
+    return {
+        primary = CreateABWinTimerCrackleArcTexture(texturePath, 4, mask),
+        secondary = CreateABWinTimerCrackleArcTexture(texturePath, 5, mask),
+    }
+end
+
+abWinTimerWidget.hordeBorderLightning = CreateABWinTimerCrackleArcSet(
+    "Interface\\AddOns\\ZurkMaps\\Media\\AB_CracklingElectricity_Horde",
+    abWinTimerWidget.hordeFiveBaseMask
+)
+abWinTimerWidget.allianceBorderLightning = CreateABWinTimerCrackleArcSet(
+    "Interface\\AddOns\\ZurkMaps\\Media\\AB_CracklingElectricity_Alliance",
+    abWinTimerWidget.allianceFiveBaseMask
+)
+
+local function HideABWinTimerCrackleSet(set)
+    if not set then return end
+    if set.primary then set.primary:Hide() end
+    if set.secondary then set.secondary:Hide() end
+end
+
+local function HideABWinTimerFiveBaseBorderLightning()
+    HideABWinTimerCrackleSet(abWinTimerWidget.hordeBorderLightning)
+    HideABWinTimerCrackleSet(abWinTimerWidget.allianceBorderLightning)
+    abWinTimerWidget.fiveBaseBorderFrame:Hide()
+end
+
+local function SetABWinTimerCrackleFrame(texture, frameIndex)
+    frameIndex = frameIndex % AB_WIN_TIMER_CRACKLE_FRAME_COUNT
+    local col = frameIndex % AB_WIN_TIMER_CRACKLE_COLUMNS
+    local row = math.floor(frameIndex / AB_WIN_TIMER_CRACKLE_COLUMNS)
+    local u0 = col / AB_WIN_TIMER_CRACKLE_COLUMNS
+    local u1 = (col + 1) / AB_WIN_TIMER_CRACKLE_COLUMNS
+    local v0 = row / AB_WIN_TIMER_CRACKLE_ROWS
+    local v1 = (row + 1) / AB_WIN_TIMER_CRACKLE_ROWS
+    texture:SetTexCoord(u0, u1, v0, v1)
+end
+
+local function SetABWinTimerCrackleArcFromOrigin(texture, faction, yOffset, height, width)
+    if not texture or not width or width < 2 then
+        if texture then texture:Hide() end
+        return
+    end
+
+    texture:ClearAllPoints()
+    texture:SetSize(width, height)
+    if faction == "Alliance" then
+        texture:SetPoint("RIGHT", abWinTimerWidget.trackFrame, "RIGHT", -AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_ORIGIN_INSET, yOffset)
+    else
+        texture:SetPoint("LEFT", abWinTimerWidget.trackFrame, "LEFT", AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_ORIGIN_INSET, yOffset)
+    end
+    texture:Show()
+end
+
+local function SetABWinTimerCrackleArcAtSpark(texture, faction, yOffset, height, progressWidth, width, inset)
+    if not texture or not width or width < 2 or not progressWidth or progressWidth < 2 then
+        if texture then texture:Hide() end
+        return
+    end
+
+    local sparkInset = inset or 0
+    texture:ClearAllPoints()
+    texture:SetSize(width, height)
+    if faction == "Alliance" then
+        texture:SetPoint("LEFT", abWinTimerWidget.trackFrame, "RIGHT", -(progressWidth - sparkInset), yOffset)
+    else
+        texture:SetPoint("RIGHT", abWinTimerWidget.trackFrame, "LEFT", progressWidth - sparkInset, yOffset)
+    end
+    texture:Show()
+end
+
+local function UpdateABWinTimerCrackleSet(set, faction, progress, elapsedTime, powerDownAlpha)
+    if not set then return end
+
+    local primary = set.primary
+    local secondary = set.secondary
+    local baseTime = elapsedTime or 0
+    local fadeAlpha = math.max(0, math.min(1, tonumber(powerDownAlpha) or 1))
+    local collapseScale = 0.72 + (0.28 * fadeAlpha)
+    local progressWidth = abWinTimerTrackWidth * math.max(0, math.min(1, tonumber(progress) or 0))
+
+    local primaryFrame = math.floor(baseTime / AB_WIN_TIMER_CRACKLE_FRAME_SECONDS) % AB_WIN_TIMER_CRACKLE_FRAME_COUNT
+    local secondaryFrame = math.floor((baseTime + 0.19) / AB_WIN_TIMER_CRACKLE_FRAME_SECONDS) % AB_WIN_TIMER_CRACKLE_FRAME_COUNT
+    SetABWinTimerCrackleFrame(primary, primaryFrame)
+    SetABWinTimerCrackleFrame(secondary, secondaryFrame)
+
+    local primaryWidth = math.min(AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_MAX_WIDTH, math.max(0, progressWidth - AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_ORIGIN_INSET)) * collapseScale
+    local secondaryAvailable = progressWidth - AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_DELAY
+    local secondaryWidth = math.min(AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_MAX_WIDTH, math.max(0, secondaryAvailable)) * collapseScale
+
+    local heightBoost = math.min(3, progressWidth / 50)
+    local heightScale = 0.82 + (0.18 * fadeAlpha)
+    SetABWinTimerCrackleArcFromOrigin(primary, faction, AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_Y, (AB_WIN_TIMER_CRACKLE_ARC_PRIMARY_HEIGHT + heightBoost) * heightScale, primaryWidth)
+    SetABWinTimerCrackleArcAtSpark(secondary, faction, AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_Y, (AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_HEIGHT + (heightBoost * 0.75)) * heightScale, progressWidth, secondaryWidth, AB_WIN_TIMER_CRACKLE_ARC_SECONDARY_INSET)
+
+    local intensity = math.max(0, math.min(1, progressWidth / abWinTimerTrackWidth))
+    if primary:IsShown() then
+        local flickerA = 0.5 + (0.5 * math.sin((baseTime * 18.0) + 0.2))
+        local flickerB = 0.5 + (0.5 * math.sin((baseTime * 10.7) + 1.3))
+        primary:SetAlpha(((0.54 + (0.18 * intensity)) + ((0.26 + (0.10 * intensity)) * flickerA * flickerB)) * fadeAlpha)
+    end
+    if secondary:IsShown() then
+        local flickerA = 0.5 + (0.5 * math.sin((baseTime * 16.0) + 1.2))
+        local flickerB = 0.5 + (0.5 * math.sin((baseTime * 8.3) + 0.7))
+        secondary:SetAlpha(((0.18 + (0.16 * intensity)) + ((0.28 + (0.16 * intensity)) * flickerA * flickerB)) * fadeAlpha)
+    end
+end
+
+abWinTimerWidget.progressSpark = abWinTimerWidget.trackFrame:CreateTexture(nil, "ARTWORK", nil, 4)
+abWinTimerWidget.progressSpark:SetTexture(AB_WIN_TIMER_PROGRESS_SPARK_TEXTURE)
+abWinTimerWidget.progressSpark:SetBlendMode("ADD")
+abWinTimerWidget.progressSpark:SetSize(AB_WIN_TIMER_PROGRESS_SPARK_WIDTH, AB_WIN_TIMER_PROGRESS_SPARK_HEIGHT)
+if abWinTimerWidget.hordeFiveBaseMask and abWinTimerWidget.progressSpark.AddMaskTexture then
+    abWinTimerWidget.progressSpark:AddMaskTexture(abWinTimerWidget.hordeFiveBaseMask)
+end
+abWinTimerWidget.progressSpark:Hide()
+
+local function HideABWinTimerProgressSpark()
+    abWinTimerWidget.progressSpark:Hide()
+end
+
+local function PositionABWinTimerProgressSpark(faction, progress)
+    if not faction then
+        HideABWinTimerProgressSpark()
+        HideABWinTimerFiveBaseBorderLightning()
+        return
+    end
+
+    progress = math.max(0, math.min(1, tonumber(progress) or 0))
+    local width = abWinTimerTrackWidth * progress
+    if width < 1 then
+        HideABWinTimerProgressSpark()
+        return
+    end
+
+    local edgeInset = 5
+    local edgeOffset
+    if faction == "Alliance" then
+        edgeOffset = -math.min(abWinTimerTrackWidth - edgeInset, math.max(edgeInset, width)) + AB_WIN_TIMER_PROGRESS_SPARK_ALLIANCE_X_OFFSET
+        abWinTimerWidget.progressSpark:ClearAllPoints()
+        abWinTimerWidget.progressSpark:SetPoint("CENTER", abWinTimerWidget.trackFrame, "RIGHT", edgeOffset, 0)
+        abWinTimerWidget.progressSpark:SetVertexColor(0.96, 1.00, 1.00, 1)
+    else
+        edgeOffset = math.min(abWinTimerTrackWidth - edgeInset, math.max(edgeInset, width)) + AB_WIN_TIMER_PROGRESS_SPARK_HORDE_X_OFFSET
+        abWinTimerWidget.progressSpark:ClearAllPoints()
+        abWinTimerWidget.progressSpark:SetPoint("CENTER", abWinTimerWidget.trackFrame, "LEFT", edgeOffset, 0)
+        abWinTimerWidget.progressSpark:SetVertexColor(1.00, 0.97, 0.92, 1)
+    end
+end
+
+local function SetABWinTimerFiveBaseProgress(faction, progress)
+    HideABWinTimerFiveBaseBeams()
+    HideABWinTimerProgressSpark()
+    if faction ~= "Alliance" and faction ~= "Horde" then return end
+
+    progress = math.max(0, math.min(1, tonumber(progress) or 0))
+    local width = abWinTimerTrackWidth * progress
+    if width < 1 then return end
+
+    local beamInset = AB_WIN_TIMER_5BASE_BEAM_EDGE_INSET
+    local visibleWidth = width
+    local trim = AB_WIN_TIMER_5BASE_BEAM_TEXCOORD_TRIM
+    local usable = 1 - (trim * 2)
+
+    if faction == "Horde" then
+        local left, right = trim, trim + (usable * progress)
+        for _, texture in ipairs({abWinTimerWidget.hordeFiveBaseBeam, abWinTimerWidget.hordeFiveBaseBeamHot}) do
+            texture:ClearAllPoints()
+            texture:SetPoint("LEFT", abWinTimerWidget.trackFrame, "LEFT", beamInset, 0)
+            texture:SetSize(visibleWidth, AB_WIN_TIMER_5BASE_BEAM_HEIGHT)
+            texture:SetTexCoord(left, right, 0, 1)
+            texture:Show()
+        end
+    else
+        local left, right = (1 - trim) - (usable * progress), 1 - trim
+        for _, texture in ipairs({abWinTimerWidget.allianceFiveBaseBeam, abWinTimerWidget.allianceFiveBaseBeamHot}) do
+            texture:ClearAllPoints()
+            texture:SetPoint("RIGHT", abWinTimerWidget.trackFrame, "RIGHT", -beamInset, 0)
+            texture:SetSize(visibleWidth, AB_WIN_TIMER_5BASE_BEAM_HEIGHT)
+            texture:SetTexCoord(left, right, 0, 1)
+            texture:Show()
+        end
+    end
+end
+
+local ABWinTimerAnimateTexCoords = (TextureUtil and TextureUtil.AnimateTexCoords) or _G.AnimateTexCoords
+
+local function CreateABWinTimerText(parent, fontSize)
+    local text = parent:CreateFontString(nil, "OVERLAY")
+    text:SetFont("Fonts\\ARIALN.TTF", fontSize or 10, "OUTLINE")
+    text:SetTextColor(1, 1, 1, 1)
+    text:SetShadowColor(0, 0, 0, 1)
+    text:SetShadowOffset(1, -1)
+    return text
+end
+
+-- Match the existing AB/AV capture-clock spacing, but slightly tighten the
+-- 1-digit-minute case so it does not leave a weird moat before the colon.
+abWinTimerWidget.minute = CreateABWinTimerText(abWinTimerWidget, 10)
+abWinTimerWidget.minute:SetSize(16, 12)
+abWinTimerWidget.minute:SetJustifyH("CENTER")
+abWinTimerWidget.colon = CreateABWinTimerText(abWinTimerWidget, 10)
+abWinTimerWidget.colon:SetText(":")
+abWinTimerWidget.secondTens = CreateABWinTimerText(abWinTimerWidget, 10)
+abWinTimerWidget.secondOnes = CreateABWinTimerText(abWinTimerWidget, 10)
+
+abWinTimerWidget.clockText = CreateABWinTimerText(abWinTimerWidget, 10)
+abWinTimerWidget.clockText:SetPoint("CENTER", abWinTimerWidget, "CENTER", 0, 0)
+abWinTimerWidget.clockText:SetJustifyH("CENTER")
+abWinTimerWidget.clockText:SetSize(54, 12)
+abWinTimerWidget.minute:Hide()
+abWinTimerWidget.colon:Hide()
+abWinTimerWidget.secondTens:Hide()
+abWinTimerWidget.secondOnes:Hide()
+
+abWinTimerWidget.winFrame = CreateFrame("Frame", nil, abWinTimerWidget)
+abWinTimerWidget.winFrame:SetSize(120, 16)
+abWinTimerWidget.winFrame:SetPoint("CENTER", abWinTimerWidget, "CENTER", 0, 0)
+abWinTimerWidget.winFrame:SetFrameLevel(abWinTimerWidget:GetFrameLevel() + 2)
+abWinTimerWidget.winFrame:EnableMouse(false)
+abWinTimerWidget.winFrame:Hide()
+
+abWinTimerWidget.winLeftIcon = abWinTimerWidget.winFrame:CreateTexture(nil, "OVERLAY")
+abWinTimerWidget.winLeftIcon:SetSize(10, 10)
+abWinTimerWidget.winLeftIcon:SetPoint("LEFT", abWinTimerWidget.winFrame, "LEFT", 2, 0)
+
+abWinTimerWidget.winRightIcon = abWinTimerWidget.winFrame:CreateTexture(nil, "OVERLAY")
+abWinTimerWidget.winRightIcon:SetSize(10, 10)
+abWinTimerWidget.winRightIcon:SetPoint("RIGHT", abWinTimerWidget.winFrame, "RIGHT", -2, 0)
+
+abWinTimerWidget.winTextBackdrop = abWinTimerWidget.winFrame:CreateTexture(nil, "OVERLAY", nil, -1)
+abWinTimerWidget.winTextBackdrop:SetTexture("Interface\\Buttons\\WHITE8x8")
+abWinTimerWidget.winTextBackdrop:SetPoint("CENTER", abWinTimerWidget.winFrame, "CENTER", 0, 0)
+abWinTimerWidget.winTextBackdrop:SetSize(74, 12)
+abWinTimerWidget.winTextBackdrop:SetVertexColor(0, 0, 0, 0)
+abWinTimerWidget.winTextBackdrop:Hide()
+
+abWinTimerWidget.winText = CreateABWinTimerText(abWinTimerWidget.winFrame, 10)
+abWinTimerWidget.winText:SetPoint("CENTER", abWinTimerWidget.winFrame, "CENTER", 0, 0)
+abWinTimerWidget.winText:SetTextColor(1.00, 0.95, 0.62, 1)
+abWinTimerWidget.winText:SetFont("Fonts\\ARIALN.TTF", 10, "OUTLINE")
+abWinTimerWidget.winText:SetShadowOffset(1, -1)
+abWinTimerWidget.winText:SetShadowColor(0, 0, 0, 1)
+abWinTimerWidget.winText:SetWidth(90)
+abWinTimerWidget.winText:SetJustifyH("CENTER")
+
+local function SetABWinWinnerIcons(faction)
+    local atlasChoices = faction == "Horde"
+        and { "ShipMissionIcon-SiegeH-MapBadge" }
+        or { "ShipMissionIcon-SiegeA-MapBadge" }
+    ApplyABWinTimerAtlas(abWinTimerWidget.winLeftIcon, atlasChoices)
+    ApplyABWinTimerAtlas(abWinTimerWidget.winRightIcon, atlasChoices)
+end
+
+local function UpdateABWinTimerScale(addonScale)
+    addonScale = tonumber(addonScale) or 1
+    local compensationScale = addonScale < 1 and math.min(1.38, 1 / math.max(addonScale, 0.72)) or 1
+
+    abWinTimerMask:SetSize((AB_WIN_TIMER_WIDTH + 12) * compensationScale, AB_WIN_TIMER_MASK_HEIGHT * compensationScale)
+    abWinTimerWidget:SetScale(compensationScale)
+    abWinTimerWidget.clockText:SetFont("Fonts\\ARIALN.TTF", 10 * compensationScale, "OUTLINE")
+    abWinTimerWidget.winText:SetFont("Fonts\\ARIALN.TTF", 10 * compensationScale, "OUTLINE")
+end
+
+local function PositionABWinTimerClock(minuteValue)
+    local hasTwoDigitMinutes = (tonumber(minuteValue) or 0) >= 10
+
+    abWinTimerWidget.minute:ClearAllPoints()
+    abWinTimerWidget.colon:ClearAllPoints()
+    abWinTimerWidget.secondTens:ClearAllPoints()
+    abWinTimerWidget.secondOnes:ClearAllPoints()
+
+    if hasTwoDigitMinutes then
+        abWinTimerWidget.minute:SetPoint("CENTER", abWinTimerWidget, "CENTER", -6.5, 0)
+        abWinTimerWidget.colon:SetPoint("CENTER", abWinTimerWidget, "CENTER", -2.2, 0)
+        abWinTimerWidget.secondTens:SetPoint("CENTER", abWinTimerWidget, "CENTER", 1.9, 0)
+        abWinTimerWidget.secondOnes:SetPoint("CENTER", abWinTimerWidget, "CENTER", 6.0, 0)
+    else
+        abWinTimerWidget.minute:SetPoint("CENTER", abWinTimerWidget, "CENTER", -4.6, 0)
+        abWinTimerWidget.colon:SetPoint("CENTER", abWinTimerWidget, "CENTER", -0.8, 0)
+        abWinTimerWidget.secondTens:SetPoint("CENTER", abWinTimerWidget, "CENTER", 3.3, 0)
+        abWinTimerWidget.secondOnes:SetPoint("CENTER", abWinTimerWidget, "CENTER", 7.4, 0)
+    end
+end
+
+PositionABWinTimerClock(0)
+UpdateABWinTimerScale(1)
+
+local abWinTimer = {
+    widget = abWinTimerWidget,
+    activated = false,
+    revealElapsed = nil,
+    glowElapsed = nil,
+    glowFaction = nil,
+    pendingGlowFaction = nil,
+    paceFaction = nil,
+    paceBases = 0,
+    burnElapsed = 0,
+    fiveBaseFadeElapsed = nil,
+    fiveBaseFadeFaction = nil,
+    fiveBaseFadeProgress = nil,
+    fiveBaseFadeBurnElapsed = nil,
+    winnerFaction = nil,
+    winnerAnimElapsed = nil,
+    livePollElapsed = 0,
+    liveAllianceScore = nil,
+    liveHordeScore = nil,
+    liveAllianceBases = nil,
+    liveHordeBases = nil,
+    liveAllianceScoreTime = nil,
+    liveHordeScoreTime = nil,
+    testAllianceScore = 0,
+    testHordeScore = 0,
+    testRunning = false,
+    broadcastFaction = nil,
+    broadcastRemaining = nil,
+    broadcastUpdatedAt = nil,
+    broadcastDidWin = false,
+}
+
+abWinTimerWidget.clickButton = CreateFrame("Button", nil, abWinTimerWidget)
+abWinTimerWidget.clickButton:SetAllPoints(abWinTimerWidget)
+abWinTimerWidget.clickButton:SetFrameLevel(abWinTimerWidget:GetFrameLevel() + 6)
+abWinTimerWidget.clickButton:RegisterForClicks("LeftButtonUp")
+abWinTimerWidget.clickButton:EnableMouse(true)
+abWinTimerWidget.clickButton:SetScript("OnClick", function()
+    abWinTimer:BroadcastPace()
+end)
+abWinTimerWidget.clickButton:SetScript("OnEnter", function(self)
+    local message = abWinTimer:GetBroadcastMessage()
+    if not message then return end
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetText("Report Game Time")
+    GameTooltip:AddLine(message, 1, 1, 1, true)
+    GameTooltip:Show()
+end)
+abWinTimerWidget.clickButton:SetScript("OnLeave", function()
+    GameTooltip:Hide()
+end)
+
+local function SetABWinTimerClock(seconds)
+    local value = tonumber(seconds)
+    if not value then
+        abWinTimerWidget.clockText:SetText("?:??")
+        return
+    end
+
+    value = math.max(0, math.ceil(value))
+    local minutes = math.floor(value / 60)
+    local secs = value % 60
+    abWinTimerWidget.clockText:SetFormattedText("%d:%02d", minutes, secs)
+end
+
+local function FormatABWinTimerBroadcastTime(seconds)
+    local value = tonumber(seconds)
+    if not value or value >= AB_WIN_TIMER_INFINITY then return nil end
+    value = math.max(0, math.ceil(value))
+    return string.format("%d:%02d", math.floor(value / 60), value % 60)
+end
+
+function abWinTimer:GetBroadcastMessage()
+    local faction = self.broadcastFaction
+    if faction ~= "Alliance" and faction ~= "Horde" then return nil end
+    if self.broadcastDidWin then return nil end
+
+    local remaining = tonumber(self.broadcastRemaining)
+    if not remaining or remaining >= AB_WIN_TIMER_INFINITY then return nil end
+    if self.broadcastUpdatedAt then
+        remaining = math.max(0, remaining - math.max(0, ABWinTimerNow() - self.broadcastUpdatedAt))
+    end
+    if remaining <= 0 then return nil end
+
+    local timeText = FormatABWinTimerBroadcastTime(remaining)
+    if not timeText then return nil end
+    return string.format("%s win in ~%s if bases hold", faction, timeText)
+end
+
+function abWinTimer:BroadcastPace()
+    local message = self:GetBroadcastMessage()
+    if not message then return end
+
+    -- Always use the same shared callout router as every other AB map callout,
+    -- including while AB Test Mode is active. This keeps timer clicks on /say
+    -- outside battlegrounds and /bg or /rw inside battlegrounds according to
+    -- the user's Zurk Maps callout-channel setting.
+    Report(message)
+end
+
+local function CountABWinTimerControlledBases()
+    local allianceBases, hordeBases = 0, 0
+    for _, baseNode in ipairs(BASE_NODES) do
+        local textureIndex = abTestMode and tonumber(abTestBaseNodeStates[baseNode.id]) or nil
+        textureIndex = textureIndex or tonumber(baseNode.currentTextureIndex) or baseNode.neutralTextureIndex
+        local offset = textureIndex - baseNode.neutralTextureIndex
+        if offset == 2 then
+            allianceBases = allianceBases + 1
+        elseif offset == 4 then
+            hordeBases = hordeBases + 1
+        end
+    end
+    return allianceBases, hordeBases
+end
+
+local function GetABWinTimerRate(baseCount)
+    return AB_WIN_TIMER_SCORE_PER_SECOND[tonumber(baseCount) or 0] or 0
+end
+
+local function GetABWinTimerLiveRemaining(score, bases, scoreTime, now)
+    score = math.max(0, math.min(AB_WIN_TIMER_MAX_SCORE, tonumber(score) or 0))
+    local rate = GetABWinTimerRate(bases)
+    if score >= AB_WIN_TIMER_MAX_SCORE then return 0, rate, AB_WIN_TIMER_MAX_SCORE end
+    if rate <= 0 then return AB_WIN_TIMER_INFINITY, rate, score end
+
+    local elapsedSinceScore = scoreTime and math.max(0, now - scoreTime) or 0
+    local remaining = ((AB_WIN_TIMER_MAX_SCORE - score) / rate) - elapsedSinceScore
+    return math.max(0, remaining), rate
+end
+
+local function ChooseABWinTimerPace(allianceRemaining, hordeRemaining)
+    local aFinite = allianceRemaining < AB_WIN_TIMER_INFINITY
+    local hFinite = hordeRemaining < AB_WIN_TIMER_INFINITY
+    if not aFinite and not hFinite then return nil, nil end
+    if aFinite and not hFinite then return "Alliance", allianceRemaining end
+    if hFinite and not aFinite then return "Horde", hordeRemaining end
+
+    if allianceRemaining + AB_WIN_TIMER_TIE_EPSILON < hordeRemaining then
+        return "Alliance", allianceRemaining
+    elseif hordeRemaining + AB_WIN_TIMER_TIE_EPSILON < allianceRemaining then
+        return "Horde", hordeRemaining
+    end
+    return nil, math.min(allianceRemaining, hordeRemaining)
+end
+
+local function GetABWinTimerGlowAlpha(baseCount)
+    baseCount = tonumber(baseCount) or 0
+    if baseCount >= 5 then return 0.90 end
+    if baseCount >= 4 then return 0.72 end
+    if baseCount >= 3 then return 0.32 end
+    return 0
+end
+
+function abWinTimer:PositionWidget(yOffset)
+    self.widget:ClearAllPoints()
+    self.widget:SetPoint("TOP", abWinTimerMask, "TOP", 0, yOffset)
+end
+
+function abWinTimer:Activate()
+    if self.activated then return end
+    self.activated = true
+    self.revealElapsed = 0
+    self.pendingGlowFaction = self.paceFaction
+    self:PositionWidget(AB_WIN_TIMER_START_Y)
+    self.widget:SetAlpha(0)
+    self.widget:Show()
+end
+
+function abWinTimer:StartGlow(faction)
+    if faction ~= "Alliance" and faction ~= "Horde" then return end
+    self.glowFaction = faction
+    self.glowElapsed = 0
+    self.pendingGlowFaction = nil
+
+    local glowFrame = self.widget.glowFrame
+    glowFrame:SetScale(0.96)
+    glowFrame:SetAlpha(0)
+    self.widget.allianceGlow:SetShown(faction == "Alliance")
+    self.widget.hordeGlow:SetShown(faction == "Horde")
+    glowFrame:Show()
+end
+
+function abWinTimer:ShowWinner(faction)
+    if faction ~= "Alliance" and faction ~= "Horde" then return end
+    if self.winnerFaction ~= faction then
+        self.winnerFaction = faction
+        self.winnerAnimElapsed = 0
+        SetABWinWinnerIcons(faction)
+        abWinTimerWidget.winText:SetText((faction == "Horde" and "HORDE   WIN") or "ALLIANCE   WIN")
+        self.widget.winFrame:SetScale(0.88)
+        self.widget.winFrame:SetAlpha(0)
+    end
+    self.widget.clockText:Hide()
+    self.widget.winFrame:Show()
+end
+
+function abWinTimer:HideWinner()
+    self.winnerFaction = nil
+    self.winnerAnimElapsed = nil
+    self.widget.winFrame:Hide()
+    self.widget.clockText:Show()
+end
+
+function abWinTimer:SetPace(faction, remaining, winningProgress, winningBases, didWin)
+    local previousFaction = self.paceFaction
+    local previousBases = tonumber(self.paceBases) or 0
+    local nextBases = tonumber(winningBases) or 0
+    local factionChanged = faction ~= previousFaction
+    local wasFiveBase = previousFaction and previousBases >= 5
+    local isFiveBase = faction and nextBases >= 5
+    local beginFiveBasePowerDown = wasFiveBase and not isFiveBase
+
+    if beginFiveBasePowerDown then
+        self.fiveBaseFadeElapsed = 0
+        self.fiveBaseFadeFaction = previousFaction
+        self.fiveBaseFadeProgress = self.lastWinningProgress or math.max(0, math.min(1, tonumber(winningProgress) or 0))
+        self.fiveBaseFadeBurnElapsed = self.burnElapsed or 0
+        if self.progressSparkFaction == previousFaction and self.progressSparkPersistent then
+            self.progressSparkPersistent = false
+            self.progressSparkElapsed = 0
+        end
+    elseif isFiveBase then
+        self.fiveBaseFadeElapsed = nil
+        self.fiveBaseFadeFaction = nil
+        self.fiveBaseFadeProgress = nil
+        self.fiveBaseFadeBurnElapsed = nil
+    end
+
+    self.paceFaction = faction
+    self.paceBases = nextBases
+    self.broadcastFaction = faction
+    self.broadcastRemaining = tonumber(remaining)
+    self.broadcastUpdatedAt = ABWinTimerNow()
+    self.broadcastDidWin = didWin and true or false
+    if factionChanged then
+        self.pendingGlowFaction = nil
+        self.glowElapsed = nil
+        if not beginFiveBasePowerDown then
+            self.burnElapsed = 0
+        end
+        self.widget.allianceGlow:Hide()
+        self.widget.hordeGlow:Hide()
+        if self.widget.hordeGlowHot then self.widget.hordeGlowHot:Hide() end
+        self.widget.glowFrame:SetAlpha(0)
+        self.widget.glowFrame:Hide()
+        if not beginFiveBasePowerDown then
+            HideABWinTimerFiveBaseBeams()
+            HideABWinTimerFiveBaseBorderLightning()
+        end
+        if faction == "Alliance" then
+            self.widget.allianceIconGlow.elapsed = 0
+            self.widget.allianceIconGlow.fadeAlpha = 0
+        elseif faction == "Horde" then
+            self.widget.hordeIconGlow.elapsed = 0
+            self.widget.hordeIconGlow.fadeAlpha = 0
+        end
+    end
+
+    if didWin and faction then
+        self:ShowWinner(faction)
+    else
+        self:HideWinner()
+        if remaining then
+            SetABWinTimerClock(remaining)
+        else
+            SetABWinTimerClock(nil)
+        end
+    end
+
+    self.widget.allianceFill:Hide()
+    self.widget.hordeFill:Hide()
+    SetABWinTimerIconGlowActive(self.widget.allianceIconGlow, false, 0)
+    SetABWinTimerIconGlowActive(self.widget.hordeIconGlow, false, 0)
+    if not self.fiveBaseFadeElapsed then
+        HideABWinTimerFiveBaseBeams()
+    end
+    if not faction then
+        self.progressSparkFaction = nil
+        self.progressSparkProgress = nil
+        self.progressSparkPersistent = nil
+        self.progressSparkElapsed = nil
+        self.lastWinningProgress = nil
+        self.lastWinningFaction = nil
+        HideABWinTimerProgressSpark()
+        return
+    end
+
+    local progress = math.max(0, math.min(1, tonumber(winningProgress) or 0))
+    local width = abWinTimerTrackWidth * progress
+    local useFiveBaseBeam = (self.paceFaction == faction) and ((tonumber(self.paceBases) or 0) >= 5)
+    if width >= 1 then
+        if useFiveBaseBeam then
+            if faction == "Alliance" then
+                self.widget.allianceFill:SetWidth(width)
+                self.widget.allianceFill:Show()
+                SetABWinTimerIconGlowActive(self.widget.allianceIconGlow, true, progress)
+            else
+                self.widget.hordeFill:SetWidth(width)
+                self.widget.hordeFill:Show()
+                SetABWinTimerIconGlowActive(self.widget.hordeIconGlow, true, progress)
+            end
+            SetABWinTimerFiveBaseProgress(faction, progress)
+        elseif faction == "Alliance" then
+            self.widget.allianceFill:SetWidth(width)
+            self.widget.allianceFill:Show()
+            SetABWinTimerIconGlowActive(self.widget.allianceIconGlow, true, progress)
+        else
+            self.widget.hordeFill:SetWidth(width)
+            self.widget.hordeFill:Show()
+            SetABWinTimerIconGlowActive(self.widget.hordeIconGlow, true, progress)
+        end
+    end
+
+    local moved = (self.lastWinningFaction ~= faction) or (self.lastWinningProgress == nil) or (math.abs(progress - self.lastWinningProgress) > 0.0005)
+    self.lastWinningFaction = faction
+    self.lastWinningProgress = progress
+
+    if progress >= 1 then
+        self.progressSparkFaction = nil
+        self.progressSparkProgress = nil
+        self.progressSparkPersistent = nil
+        self.progressSparkElapsed = nil
+        HideABWinTimerProgressSpark()
+    elseif useFiveBaseBeam then
+        self.progressSparkFaction = faction
+        self.progressSparkProgress = progress
+        self.progressSparkPersistent = true
+        self.progressSparkElapsed = 0
+        PositionABWinTimerProgressSpark(faction, progress)
+        self.widget.progressSpark:SetAlpha(1)
+        self.widget.progressSpark:Show()
+    elseif moved and width >= 1 then
+        self.progressSparkFaction = faction
+        self.progressSparkProgress = progress
+        self.progressSparkPersistent = false
+        self.progressSparkElapsed = 0
+        PositionABWinTimerProgressSpark(faction, progress)
+        self.widget.progressSpark:SetAlpha(1)
+        self.widget.progressSpark:Show()
+    end
+end
+
+function abWinTimer:Reset()
+    self.activated = false
+    self.revealElapsed = nil
+    self.glowElapsed = nil
+    self.glowFaction = nil
+    self.pendingGlowFaction = nil
+    self.paceFaction = nil
+    self.paceBases = 0
+    self.broadcastFaction = nil
+    self.broadcastRemaining = nil
+    self.broadcastUpdatedAt = nil
+    self.broadcastDidWin = false
+    self.burnElapsed = 0
+    self.fiveBaseFadeElapsed = nil
+    self.fiveBaseFadeFaction = nil
+    self.fiveBaseFadeProgress = nil
+    self.fiveBaseFadeBurnElapsed = nil
+    self.progressSparkFaction = nil
+    self.progressSparkProgress = nil
+    self.progressSparkPersistent = nil
+    self.progressSparkElapsed = nil
+    self.lastWinningProgress = nil
+    self.lastWinningFaction = nil
+    self.winnerFaction = nil
+    self.winnerAnimElapsed = nil
+    self.livePollElapsed = 0
+    self.liveAllianceScore = nil
+    self.liveHordeScore = nil
+    self.liveAllianceBases = nil
+    self.liveHordeBases = nil
+    self.liveAllianceScoreTime = nil
+    self.liveHordeScoreTime = nil
+    self.widget.allianceFill:Hide()
+    self.widget.hordeFill:Hide()
+    self.widget.allianceIconGlow.fadeAlpha = 0
+    self.widget.allianceIconGlow.fadeTarget = 0
+    self.widget.allianceIconGlow:SetAlpha(0)
+    self.widget.allianceIconGlow:Hide()
+    self.widget.hordeIconGlow.fadeAlpha = 0
+    self.widget.hordeIconGlow.fadeTarget = 0
+    self.widget.hordeIconGlow:SetAlpha(0)
+    self.widget.hordeIconGlow:Hide()
+    self.widget.clockText:Show()
+    self.widget.winFrame:Hide()
+    self.widget.allianceGlow:Hide()
+    self.widget.hordeGlow:Hide()
+    if self.widget.hordeGlowHot then self.widget.hordeGlowHot:Hide() end
+    self.widget.glowFrame:SetAlpha(0)
+    self.widget.glowFrame:Hide()
+    HideABWinTimerFiveBaseBeams()
+    HideABWinTimerFiveBaseBorderLightning()
+    self.widget:SetAlpha(1)
+    self:PositionWidget(AB_WIN_TIMER_START_Y)
+    self.widget:Hide()
+    SetABWinTimerClock(0)
+end
+
+function abWinTimer:BeginTest()
+    self:Reset()
+    self.testAllianceScore = 0
+    self.testHordeScore = 0
+    self.testRunning = true
+end
+
+function abWinTimer:EndTest()
+    self.testRunning = false
+    self.testAllianceScore = 0
+    self.testHordeScore = 0
+    self:Reset()
+end
+
+local function ReadABWinTimerWidget(widgetID)
+    if not C_UIWidgetManager or type(C_UIWidgetManager.GetIconAndTextWidgetVisualizationInfo) ~= "function" then
+        return nil
+    end
+    local ok, info = pcall(C_UIWidgetManager.GetIconAndTextWidgetVisualizationInfo, widgetID)
+    if not ok or type(info) ~= "table" or type(info.text) ~= "string" then return nil end
+
+    -- Capping's Classic AB widgets expose text in the form "<bases> ... <score>/2000".
+    local basesText, scoreText, maxText = string.match(info.text, "(%d)[^%d]+(%d+)%s*/%s*(%d+)")
+    local bases, score, maxScore = tonumber(basesText), tonumber(scoreText), tonumber(maxText)
+    if not bases or not score then return nil end
+    return bases, score, maxScore
+end
+
+function abWinTimer:RefreshLive()
+    if abTestMode or not IsInArathiBasin() then return false end
+
+    local allianceBases, allianceScore = ReadABWinTimerWidget(AB_WIN_TIMER_ALLIANCE_WIDGET_ID)
+    local hordeBases, hordeScore = ReadABWinTimerWidget(AB_WIN_TIMER_HORDE_WIDGET_ID)
+    if allianceBases == nil or hordeBases == nil then return false end
+
+    local now = ABWinTimerNow()
+    if self.liveAllianceScore == nil or allianceScore ~= self.liveAllianceScore
+        or allianceBases ~= self.liveAllianceBases then
+        self.liveAllianceScoreTime = now
+    end
+    if self.liveHordeScore == nil or hordeScore ~= self.liveHordeScore
+        or hordeBases ~= self.liveHordeBases then
+        self.liveHordeScoreTime = now
+    end
+
+    self.liveAllianceScore = allianceScore
+    self.liveHordeScore = hordeScore
+    self.liveAllianceBases = allianceBases
+    self.liveHordeBases = hordeBases
+
+    local visualAllianceBases, visualHordeBases = CountABWinTimerControlledBases()
+    if (allianceBases + hordeBases) > 0 or (visualAllianceBases + visualHordeBases) > 0 then
+        self:Activate()
+    end
+    if not self.activated then return true end
+
+    local allianceRemaining = GetABWinTimerLiveRemaining(
+        allianceScore, allianceBases, self.liveAllianceScoreTime, now)
+    local hordeRemaining = GetABWinTimerLiveRemaining(
+        hordeScore, hordeBases, self.liveHordeScoreTime, now)
+    local faction, remaining = ChooseABWinTimerPace(allianceRemaining, hordeRemaining)
+    local winningScore = faction == "Alliance" and allianceScore or (faction == "Horde" and hordeScore or 0)
+    local winningBases = faction == "Alliance" and allianceBases or (faction == "Horde" and hordeBases or 0)
+    local didWin = faction and (winningScore >= AB_WIN_TIMER_MAX_SCORE or ((tonumber(remaining) or 1) <= 0))
+    self:SetPace(faction, remaining, winningScore / AB_WIN_TIMER_MAX_SCORE, winningBases, didWin)
+    return true
+end
+
+function abWinTimer:UpdateTest(elapsed)
+    if not abTestMode then return end
+    if not self.testRunning then self:BeginTest() end
+
+    local allianceBases, hordeBases = CountABWinTimerControlledBases()
+    local allianceRate = GetABWinTimerRate(allianceBases)
+    local hordeRate = GetABWinTimerRate(hordeBases)
+    self.testAllianceScore = math.min(AB_WIN_TIMER_MAX_SCORE,
+        self.testAllianceScore + (allianceRate * elapsed))
+    self.testHordeScore = math.min(AB_WIN_TIMER_MAX_SCORE,
+        self.testHordeScore + (hordeRate * elapsed))
+
+    if (allianceBases + hordeBases) > 0 then self:Activate() end
+    if not self.activated then return end
+
+    local allianceRemaining = allianceRate > 0
+        and math.max(0, (AB_WIN_TIMER_MAX_SCORE - self.testAllianceScore) / allianceRate)
+        or AB_WIN_TIMER_INFINITY
+    local hordeRemaining = hordeRate > 0
+        and math.max(0, (AB_WIN_TIMER_MAX_SCORE - self.testHordeScore) / hordeRate)
+        or AB_WIN_TIMER_INFINITY
+    local faction, remaining = ChooseABWinTimerPace(allianceRemaining, hordeRemaining)
+    local score = faction == "Alliance" and self.testAllianceScore or (faction == "Horde" and self.testHordeScore or 0)
+    local winningBases = faction == "Alliance" and allianceBases or (faction == "Horde" and hordeBases or 0)
+    local didWin = faction and (score >= AB_WIN_TIMER_MAX_SCORE or ((tonumber(remaining) or 1) <= 0))
+    self:SetPace(faction, remaining, score / AB_WIN_TIMER_MAX_SCORE, winningBases, didWin)
+end
+
+function abWinTimer:UpdateAnimations(elapsed)
+    if self.revealElapsed then
+        self.revealElapsed = self.revealElapsed + elapsed
+        local progress = math.max(0, math.min(1, self.revealElapsed / AB_WIN_TIMER_SLIDE_SECONDS))
+        local eased = 1 - ((1 - progress) * (1 - progress) * (1 - progress))
+        local y = AB_WIN_TIMER_START_Y + ((AB_WIN_TIMER_TARGET_Y - AB_WIN_TIMER_START_Y) * eased)
+        self:PositionWidget(y)
+        self.widget:SetAlpha(math.min(1, progress * 2.2))
+        if progress >= 1 then
+            self.revealElapsed = nil
+            self:PositionWidget(AB_WIN_TIMER_TARGET_Y)
+            self.widget:SetAlpha(1)
+        end
+    end
+
+    if self.winnerAnimElapsed then
+        self.winnerAnimElapsed = self.winnerAnimElapsed + elapsed
+        local progress = math.max(0, math.min(1, self.winnerAnimElapsed / 0.32))
+        local eased = 1 - ((1 - progress) * (1 - progress))
+        self.widget.winFrame:SetAlpha(progress)
+        self.widget.winFrame:SetScale(0.88 + (0.12 * eased))
+    end
+
+    local fiveBaseFadeMix = 0
+    if self.fiveBaseFadeElapsed and self.fiveBaseFadeFaction == self.paceFaction then
+        fiveBaseFadeMix = 1 - math.max(0, math.min(1, self.fiveBaseFadeElapsed / AB_WIN_TIMER_5BASE_POWERDOWN_SECONDS))
+    end
+
+    local glowAlpha = GetABWinTimerGlowAlpha(self.paceBases)
+    if fiveBaseFadeMix > 0 then
+        local fiveBaseGlowAlpha = GetABWinTimerGlowAlpha(5)
+        glowAlpha = glowAlpha + ((fiveBaseGlowAlpha - glowAlpha) * fiveBaseFadeMix)
+    end
+    if self.paceFaction and glowAlpha > 0 then
+        -- Both factions keep the same fitted geometry. Horde visibility now comes
+        -- from the boss capturebar glow asset stacked in red, rather than from
+        -- a weak tinted neutral glow.
+        self.widget.glowFrame:SetSize(abWinTimerTrackWidth + 2, AB_WIN_TIMER_FILL_HEIGHT + 12)
+        self.widget.allianceGlow:SetShown(self.paceFaction == "Alliance")
+        self.widget.hordeGlow:SetShown(self.paceFaction == "Horde")
+        self.widget.hordeGlowHot:SetShown(self.paceFaction == "Horde")
+
+        local isFiveBase = (tonumber(self.paceBases) or 0) >= 5
+        local fiveBaseIntensity = isFiveBase and 1 or fiveBaseFadeMix
+        local alphaMult = self.paceFaction == "Horde" and AB_WIN_TIMER_HORDE_PACE_GLOW_ALPHA_MULT or 1
+        local pulseTime = (ABWinTimerNow() or 0)
+        local normalPulse = 0.96 + (0.04 * math.sin(pulseTime * 3.4))
+        local fivePulse = 0.68 + (0.32 * (0.5 + (0.5 * math.sin(pulseTime * 5.0))))
+        local pulse = normalPulse + ((fivePulse - normalPulse) * fiveBaseIntensity)
+        local fiveScale = 0.995 + (0.012 * (0.5 + (0.5 * math.sin(pulseTime * 5.0))))
+        local scale = 1 + ((fiveScale - 1) * fiveBaseIntensity)
+        local allianceFiveAlpha = 0.68 + (0.32 * (0.5 + (0.5 * math.sin((pulseTime * 5.8) + 0.4))))
+        local hordeFiveAlpha = allianceFiveAlpha
+        local hordeHotFiveAlpha = 0.24 + (0.54 * (0.5 + (0.5 * math.sin((pulseTime * 8.8) + 0.9))))
+        self.widget.allianceGlow:SetAlpha(1 + ((allianceFiveAlpha - 1) * fiveBaseIntensity))
+        self.widget.hordeGlow:SetAlpha(1 + ((hordeFiveAlpha - 1) * fiveBaseIntensity))
+        self.widget.hordeGlowHot:SetAlpha(0.72 + ((hordeHotFiveAlpha - 0.72) * fiveBaseIntensity))
+        self.widget.glowFrame:SetScale(scale)
+        self.widget.glowFrame:SetAlpha(math.min(1, glowAlpha * alphaMult * pulse))
+        self.widget.glowFrame:Show()
+    else
+        self.widget.allianceGlow:Hide()
+        self.widget.hordeGlow:Hide()
+        if self.widget.hordeGlowHot then self.widget.hordeGlowHot:Hide() end
+        self.widget.glowFrame:SetAlpha(0)
+        self.widget.glowFrame:Hide()
+    end
+
+    local doCrawl = self.paceFaction and (tonumber(self.paceBases) or 0) >= 5
+    if doCrawl then
+        self.fiveBaseFadeElapsed = nil
+        self.fiveBaseFadeFaction = nil
+        self.fiveBaseFadeProgress = nil
+        self.fiveBaseFadeBurnElapsed = nil
+        self.burnElapsed = (self.burnElapsed or 0) + (elapsed or 0)
+        local baseAlpha = 0.36 + (0.24 * (0.5 + (0.5 * math.sin((self.burnElapsed * 2.8) - 0.4))))
+        local hotAlpha = 0.14 + (0.34 * (0.5 + (0.5 * math.sin((self.burnElapsed * 5.6) + 0.8))))
+        self.widget.fiveBaseBorderFrame:Show()
+
+        if self.paceFaction == "Horde" then
+            self.widget.hordeFiveBaseBeam:SetAlpha(baseAlpha)
+            self.widget.hordeFiveBaseBeamHot:SetAlpha(hotAlpha)
+            UpdateABWinTimerCrackleSet(self.widget.hordeBorderLightning, "Horde", self.progressSparkProgress or self.lastWinningProgress or 0, self.burnElapsed, 1)
+            HideABWinTimerCrackleSet(self.widget.allianceBorderLightning)
+        else
+            self.widget.allianceFiveBaseBeam:SetAlpha(baseAlpha)
+            self.widget.allianceFiveBaseBeamHot:SetAlpha(hotAlpha)
+            UpdateABWinTimerCrackleSet(self.widget.allianceBorderLightning, "Alliance", self.progressSparkProgress or self.lastWinningProgress or 0, self.burnElapsed, 1)
+            HideABWinTimerCrackleSet(self.widget.hordeBorderLightning)
+        end
+    elseif self.fiveBaseFadeElapsed and self.fiveBaseFadeFaction then
+        self.fiveBaseFadeElapsed = self.fiveBaseFadeElapsed + (elapsed or 0)
+        self.fiveBaseFadeBurnElapsed = (self.fiveBaseFadeBurnElapsed or self.burnElapsed or 0) + (elapsed or 0)
+
+        local fadeProgress = math.max(0, math.min(1, self.fiveBaseFadeElapsed / AB_WIN_TIMER_5BASE_POWERDOWN_SECONDS))
+        local beamFade = 1 - (fadeProgress * fadeProgress)
+        local crackleFade = 1 - math.max(0, math.min(1, self.fiveBaseFadeElapsed / AB_WIN_TIMER_5BASE_CRACKLE_POWERDOWN_SECONDS))
+        local baseAlpha = (0.36 + (0.24 * (0.5 + (0.5 * math.sin((self.fiveBaseFadeBurnElapsed * 2.8) - 0.4))))) * beamFade
+        local hotAlpha = (0.14 + (0.34 * (0.5 + (0.5 * math.sin((self.fiveBaseFadeBurnElapsed * 5.6) + 0.8))))) * beamFade
+        local fadeFaction = self.fiveBaseFadeFaction
+        local fadeProgressValue = self.fiveBaseFadeProgress or self.lastWinningProgress or 0
+        self.widget.fiveBaseBorderFrame:Show()
+
+        if fadeFaction == "Horde" then
+            self.widget.hordeFiveBaseBeam:SetAlpha(baseAlpha)
+            self.widget.hordeFiveBaseBeamHot:SetAlpha(hotAlpha)
+            self.widget.hordeFiveBaseBeam:Show()
+            self.widget.hordeFiveBaseBeamHot:Show()
+            UpdateABWinTimerCrackleSet(self.widget.hordeBorderLightning, "Horde", fadeProgressValue, self.fiveBaseFadeBurnElapsed, crackleFade)
+            HideABWinTimerCrackleSet(self.widget.allianceBorderLightning)
+        else
+            self.widget.allianceFiveBaseBeam:SetAlpha(baseAlpha)
+            self.widget.allianceFiveBaseBeamHot:SetAlpha(hotAlpha)
+            self.widget.allianceFiveBaseBeam:Show()
+            self.widget.allianceFiveBaseBeamHot:Show()
+            UpdateABWinTimerCrackleSet(self.widget.allianceBorderLightning, "Alliance", fadeProgressValue, self.fiveBaseFadeBurnElapsed, crackleFade)
+            HideABWinTimerCrackleSet(self.widget.hordeBorderLightning)
+        end
+
+        if fadeProgress >= 1 then
+            self.fiveBaseFadeElapsed = nil
+            self.fiveBaseFadeFaction = nil
+            self.fiveBaseFadeProgress = nil
+            self.fiveBaseFadeBurnElapsed = nil
+            self.burnElapsed = 0
+            HideABWinTimerFiveBaseBeams()
+            HideABWinTimerFiveBaseBorderLightning()
+        end
+    else
+        self.burnElapsed = 0
+        HideABWinTimerFiveBaseBeams()
+        HideABWinTimerFiveBaseBorderLightning()
+    end
+
+    if self.progressSparkFaction and self.progressSparkProgress and self.progressSparkProgress < 1 then
+        PositionABWinTimerProgressSpark(self.progressSparkFaction, self.progressSparkProgress)
+        if self.progressSparkPersistent then
+            local pulse = 0.88 + (0.12 * (0.5 + (0.5 * math.sin((ABWinTimerNow() or 0) * 6.2))))
+            self.widget.progressSpark:SetAlpha(pulse)
+            self.widget.progressSpark:Show()
+        elseif self.widget.progressSpark:IsShown() then
+            self.progressSparkElapsed = (self.progressSparkElapsed or 0) + (elapsed or 0)
+            local fadeProgress = math.max(0, math.min(1, self.progressSparkElapsed / AB_WIN_TIMER_PROGRESS_SPARK_FADE_SECONDS))
+            self.widget.progressSpark:SetAlpha(1 - fadeProgress)
+            if fadeProgress >= 1 then
+                self.progressSparkFaction = nil
+                self.progressSparkProgress = nil
+                self.progressSparkElapsed = nil
+                HideABWinTimerProgressSpark()
+            end
+        end
+    else
+        HideABWinTimerProgressSpark()
+    end
+
+    local iconGlows = { self.widget.allianceIconGlow, self.widget.hordeIconGlow }
+    for _, glow in ipairs(iconGlows) do
+        if glow then
+            local target = tonumber(glow.fadeTarget) or 0
+            local current = tonumber(glow.fadeAlpha) or 0
+            local fadeStep = math.min(1, (elapsed or 0) / AB_WIN_TIMER_ICON_GLOW_FADE_SECONDS)
+            current = current + ((target - current) * fadeStep)
+
+            if target <= 0 and current < 0.015 then
+                current = 0
+                glow:SetAlpha(0)
+                glow:Hide()
+                if glow.rays01 then glow.rays01:Hide() end
+                if glow.rays02 then glow.rays02:Hide() end
+            else
+                if not glow:IsShown() then glow:Show() end
+                glow:SetAlpha(current)
+                glow.elapsed = (glow.elapsed or 0) + (elapsed or 0)
+
+                local progress = math.max(0, math.min(1, tonumber(glow.progress) or 0))
+                local rearPulse = 0.5 + (0.5 * math.sin(glow.elapsed * 3.6))
+                local innerPulse = 0.5 + (0.5 * math.sin((glow.elapsed * 4.2) + (math.pi * 0.72)))
+                local threshold75 = math.max(0, math.min(1, (progress - 0.75) / 0.20))
+                local threshold95 = math.max(0, math.min(1, (progress - 0.95) / 0.05))
+                local endBoost = 1 + (0.24 * threshold95)
+
+                glow.rearStar:SetSize((40 + (8 * rearPulse)) + (6 * threshold95), (40 + (8 * rearPulse)) + (6 * threshold95))
+                glow.rearStar:SetAlpha((0.66 + (0.16 * rearPulse)) + (0.12 * threshold95))
+                glow.innerStar:SetSize((30 + (7 * innerPulse)) + (5 * threshold95), (30 + (7 * innerPulse)) + (5 * threshold95))
+                glow.innerStar:SetAlpha((0.58 + (0.20 * innerPulse)) + (0.12 * threshold95))
+                if glow.rearStar.SetRotation then glow.rearStar:SetRotation(glow.elapsed * (0.72 * endBoost)) end
+                if glow.innerStar.SetRotation then glow.innerStar:SetRotation(glow.elapsed * (-0.98 * endBoost)) end
+
+                if threshold75 > 0 then
+                    local speedMult = 1.0 + (0.80 * threshold95)
+                    local rays01Pulse = 0.5 + (0.5 * math.sin((glow.elapsed * (3.4 * speedMult)) + 0.35))
+                    local rays02Pulse = 0.5 + (0.5 * math.sin((glow.elapsed * (4.4 * speedMult)) + 1.15))
+                    local rays01Size = 26 + (8 * threshold75) + (14 * threshold95) + (6 * rays01Pulse)
+                    local rays02Size = 22 + (7 * threshold75) + (16 * threshold95) + (7 * rays02Pulse)
+                    glow.rays01:SetSize(rays01Size, rays01Size)
+                    glow.rays02:SetSize(rays02Size, rays02Size)
+                    glow.rays01:SetAlpha((0.08 + (0.12 * threshold75) + (0.24 * threshold95)) * (0.72 + (0.22 * rays01Pulse)))
+                    glow.rays02:SetAlpha((0.06 + (0.10 * threshold75) + (0.28 * threshold95)) * (0.70 + (0.24 * rays02Pulse)))
+                    if glow.rays01.SetRotation then glow.rays01:SetRotation(glow.elapsed * (0.22 * speedMult)) end
+                    if glow.rays02.SetRotation then glow.rays02:SetRotation(glow.elapsed * (-0.32 * speedMult)) end
+                    glow.rays01:Show()
+                    glow.rays02:Show()
+                else
+                    glow.rays01:Hide()
+                    glow.rays02:Hide()
+                end
+            end
+
+            glow.fadeAlpha = current
+        end
+    end
+end
+
+abWinTimer.updateFrame = CreateFrame("Frame", nil, frame)
+abWinTimer.updateFrame:SetScript("OnUpdate", function(_, elapsed)
+    elapsed = tonumber(elapsed) or 0
+    abWinTimer:UpdateAnimations(elapsed)
+
+    if abTestMode then
+        abWinTimer:UpdateTest(elapsed)
+        return
+    end
+
+    if not IsInArathiBasin() then
+        if abWinTimer.activated or abWinTimer.testRunning then abWinTimer:EndTest() end
+        return
+    end
+
+    abWinTimer.testRunning = false
+    abWinTimer.livePollElapsed = abWinTimer.livePollElapsed + elapsed
+    if abWinTimer.livePollElapsed >= AB_WIN_TIMER_LIVE_POLL_SECONDS then
+        abWinTimer.livePollElapsed = abWinTimer.livePollElapsed % AB_WIN_TIMER_LIVE_POLL_SECONDS
+        abWinTimer:RefreshLive()
+    end
+end)
+
+abWinTimer.eventFrame = CreateFrame("Frame", nil, frame)
+abWinTimer.eventFrame:RegisterEvent("UPDATE_UI_WIDGET")
+abWinTimer.eventFrame:SetScript("OnEvent", function(_, _, widgetInfo)
+    if abTestMode or not IsInArathiBasin() then return end
+    local widgetID = type(widgetInfo) == "table" and widgetInfo.widgetID or tonumber(widgetInfo)
+    if widgetID == AB_WIN_TIMER_ALLIANCE_WIDGET_ID or widgetID == AB_WIN_TIMER_HORDE_WIDGET_ID then
+        abWinTimer:RefreshLive()
+    end
+end)
+
+frame.abWinTimer = abWinTimer
+end -- AB game-pace timer scope
 
 if ZurkMapsABHonor and ZurkMapsABHonor.Create then
     local abHonorBar = ZurkMapsABHonor.Create(mapBorder, frame, MAP_HEIGHT, {
@@ -1269,6 +2710,9 @@ local function UpdateMoveHandleScale(addonScale)
     )
     moveHandle:UpdateGeometry(compensationScale)
 
+    if UpdateABWinTimerScale then
+        UpdateABWinTimerScale(addonScale)
+    end
     if ConfigureFriendlyPlayerDots then
         ConfigureFriendlyPlayerDots()
     end
@@ -1526,6 +2970,49 @@ function focusCallout:GetClassDisplayName(classInfo)
     return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classInfo.token]) or classInfo.name
 end
 
+focusCallout.raidTargetChatTags = {
+    [1] = "{star}",
+    [2] = "{circle}",
+    [3] = "{diamond}",
+    [4] = "{triangle}",
+    [5] = "{moon}",
+    [6] = "{square}",
+    [7] = "{cross}",
+    [8] = "{skull}",
+}
+
+function focusCallout:ReportCurrentTarget()
+    if not UnitExists("target") or not UnitIsPlayer("target") then
+        print("|cff33ff99Zurk Maps|r: Select a player target first.")
+        return
+    end
+
+    local name = UnitName("target")
+    if not name or name == "" then
+        print("|cff33ff99Zurk Maps|r: Could not identify the current target.")
+        return
+    end
+
+    if UnitIsFriend("player", "target") then
+        local markerIndex = GetRaidTargetIndex and GetRaidTargetIndex("target")
+        local markerTag = markerIndex and self.raidTargetChatTags[markerIndex]
+        if markerTag then
+            Report("Assist " .. name .. " " .. markerTag .. "!")
+        else
+            Report("Assist " .. name .. "!")
+        end
+        return
+    end
+
+    local race = UnitRace("target")
+    local className = UnitClass("target")
+    if race and race ~= "" and className and className ~= "" then
+        Report("Focus " .. name .. " - " .. race .. " " .. className .. "!")
+    else
+        Report("Focus " .. name .. "!")
+    end
+end
+
 function focusCallout:CloseMenu()
     if self.menu then self.menu:Hide() end
     if self.dismiss then self.dismiss:Hide() end
@@ -1583,7 +3070,7 @@ focusCallout.button = CreateFrame("Button", nil, map)
 focusCallout.button:SetSize(focusCallout.BUTTON_SIZE, focusCallout.BUTTON_SIZE)
 focusCallout.button:SetPoint("TOPRIGHT", map, "TOPRIGHT", -7, -7)
 focusCallout.button:SetFrameLevel(mapBorder:GetFrameLevel() + 4)
-focusCallout.button:RegisterForClicks("LeftButtonUp")
+focusCallout.button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
 focusCallout.background = focusCallout.button:CreateTexture(nil, "BACKGROUND")
 focusCallout.background:SetAllPoints()
@@ -1685,7 +3172,7 @@ for i = 1, 8 do
             return
         end
         focusCallout:CloseMenu()
-        Report("FOCUS the " .. self.classNameUpper .. "!")
+        Report("Focus the " .. self.classNameUpper .. "!")
     end)
     focusCallout.optionButtons[i] = option
 end
@@ -1694,8 +3181,10 @@ focusCallout.button:SetScript("OnEnter", function(self)
     focusCallout.icon:SetAlpha(1)
     focusCallout.border:SetAlpha(1)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText("Focus Callout")
-    GameTooltip:AddLine("Choose the enemy class your team should focus.", 0.8, 0.8, 0.8, true)
+    GameTooltip:SetText("Focus Callout", 1.0, 0.82, 0.0)
+    GameTooltip:AddDoubleLine(((type(CreateAtlasMarkup) == "function" and (((C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("NPE_LeftClick")) or (type(GetAtlasInfo) == "function" and GetAtlasInfo("NPE_LeftClick")))) and CreateAtlasMarkup("NPE_LeftClick", 18, 18, 0, 0) or "LMB") .. " |cffff7070Enemy|r"), "|cffffffffFocus target|r", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+    GameTooltip:AddDoubleLine(((type(CreateAtlasMarkup) == "function" and (((C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("NPE_LeftClick")) or (type(GetAtlasInfo) == "function" and GetAtlasInfo("NPE_LeftClick")))) and CreateAtlasMarkup("NPE_LeftClick", 18, 18, 0, 0) or "LMB") .. " |cff70ff70Friendly|r"), "|cffffffffAssist target|r", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+    GameTooltip:AddDoubleLine(((type(CreateAtlasMarkup) == "function" and (((C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("NPE_RightClick")) or (type(GetAtlasInfo) == "function" and GetAtlasInfo("NPE_RightClick")))) and CreateAtlasMarkup("NPE_RightClick", 18, 18, 0, 0) or "RMB") .. " |cffffd36aMenu|r"), "|cffffffffChoose enemy class|r", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     GameTooltip:Show()
 end)
 
@@ -1710,7 +3199,18 @@ focusCallout.button:SetScript("OnLeave", function()
     GameTooltip:Hide()
 end)
 
-focusCallout.button:SetScript("OnClick", function()
+focusCallout.button:SetScript("OnClick", function(_, mouseButton)
+    if mouseButton == "LeftButton" then
+        focusCallout:CloseMenu()
+        GameTooltip:Hide()
+        focusCallout:ReportCurrentTarget()
+        return
+    end
+
+    if mouseButton ~= "RightButton" then
+        return
+    end
+
     if focusCallout.menu:IsShown() then
         focusCallout:CloseMenu()
         return
@@ -2308,7 +3808,7 @@ local function UpdateBaseNodeHighlightColor(baseNode)
     if not button then
         return
     end
-    local highlight = button:GetHighlightTexture()
+    local highlight = button.nodeHighlight or button:GetHighlightTexture()
     if not highlight then
         return
     end
@@ -2566,8 +4066,16 @@ RefreshBaseNodes = function()
     end
 end
 
+local BASE_NODE_MOUSE_BUFFER = 0.05
+local BASE_NODE_VISUAL_LEVEL_OFFSET = 2
+local BASE_NODE_HIT_LEVEL_OFFSET = 9
+
 for _, baseNode in ipairs(BASE_NODES) do
-    local button = CreateFrame("Button", nil, map)
+    -- Keep the objective artwork under teammate markers so a player standing on a
+    -- flag remains visible. Mouse priority is handled by a separate transparent
+    -- hit button above the markers, which gives the base callout a 5% buffer on
+    -- every side without forcing the base icon itself to render on top.
+    local button = CreateFrame("Frame", nil, map)
     button:SetSize(BASE_NODE_SIZE, BASE_NODE_SIZE)
     button:SetPoint(
         "CENTER",
@@ -2576,8 +4084,8 @@ for _, baseNode in ipairs(BASE_NODES) do
         (baseNode.x / 100) * MAP_WIDTH,
         -(baseNode.y / 100) * MAP_HEIGHT
     )
-    button:SetFrameLevel(mapBorder:GetFrameLevel() + 5)
-    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    button:SetFrameLevel(mapBorder:GetFrameLevel() + BASE_NODE_VISUAL_LEVEL_OFFSET)
+    button:EnableMouse(false)
 
     button.icon = button:CreateTexture(nil, "ARTWORK")
     button.icon:SetSize(16, 16)
@@ -2591,25 +4099,33 @@ for _, baseNode in ipairs(BASE_NODES) do
     button.fallbackRight:SetSize(8, 16)
     button.fallbackRight:SetPoint("LEFT", button, "CENTER", 0, 0)
 
-    -- Restore the softer Blizzard minimap-node highlight shape from the earlier
-    -- builds. Desaturating it first removes the texture's built-in blue cast so
-    -- vertex coloring works correctly for teal/gold/violet/orange/red as well.
-    button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
-    local nodeHighlight = button:GetHighlightTexture()
-    if nodeHighlight then
-        nodeHighlight:ClearAllPoints()
-        nodeHighlight:SetPoint("CENTER", button, "CENTER", 0, 0)
-        nodeHighlight:SetSize(BASE_NODE_SIZE + 10, BASE_NODE_SIZE + 10)
-        nodeHighlight:SetBlendMode("ADD")
-        if nodeHighlight.SetDesaturated then
-            nodeHighlight:SetDesaturated(true)
-        end
+    -- This is the old Blizzard minimap-node hover artwork, but it now lives on
+    -- the low visual layer and is toggled by the invisible priority hit box.
+    button.nodeHighlight = button:CreateTexture(nil, "OVERLAY")
+    button.nodeHighlight:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    button.nodeHighlight:SetPoint("CENTER", button, "CENTER", 0, 0)
+    button.nodeHighlight:SetSize(BASE_NODE_SIZE + 10, BASE_NODE_SIZE + 10)
+    button.nodeHighlight:SetBlendMode("ADD")
+    if button.nodeHighlight.SetDesaturated then
+        button.nodeHighlight:SetDesaturated(true)
     end
+    button.nodeHighlight:Hide()
 
-    button:SetScript("OnEnter", function(self)
+    local hitButton = CreateFrame("Button", nil, map)
+    local hitSize = BASE_NODE_SIZE * (1 + (BASE_NODE_MOUSE_BUFFER * 2))
+    hitButton:SetSize(hitSize, hitSize)
+    hitButton:SetPoint("CENTER", button, "CENTER", 0, 0)
+    hitButton:SetFrameLevel(mapBorder:GetFrameLevel() + BASE_NODE_HIT_LEVEL_OFFSET)
+    hitButton:EnableMouse(true)
+    hitButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    hitButton.baseNodeVisual = button
+    button.hitButton = hitButton
+
+    hitButton:SetScript("OnEnter", function(self)
         hoveredBaseNode = baseNode
         hoveredZone = nil
         ClearABAreaInteraction()
+        if button.nodeHighlight then button.nodeHighlight:Show() end
         GameTooltip:Hide()
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(baseNode.name)
@@ -2621,12 +4137,13 @@ for _, baseNode in ipairs(BASE_NODES) do
         GameTooltip:Show()
     end)
 
-    button:SetScript("OnLeave", function()
+    hitButton:SetScript("OnLeave", function()
         hoveredBaseNode = nil
+        if button.nodeHighlight then button.nodeHighlight:Hide() end
         GameTooltip:Hide()
     end)
 
-    button:SetScript("OnClick", function(_, mouseButton)
+    hitButton:SetScript("OnClick", function(_, mouseButton)
         if IsShiftKeyDown() then
             Report(baseNode.name .. " looking weak.")
         elseif mouseButton == "RightButton" then
@@ -2969,6 +4486,7 @@ local TEST_BASE_ALIASES = {
 local function ClearContestTestMode()
     contestedTestMode = false
     abTestMode = false
+    if frame.abWinTimer then frame.abWinTimer:EndTest() end
     abTestBaseNodeStates = {}
     if HideABTestBlips then
         HideABTestBlips()
@@ -3008,22 +4526,29 @@ end
 local function StartAllContestTests()
     contestedTestMode = true
     abTestMode = true
+    if frame.abWinTimer then frame.abWinTimer:BeginTest() end
     RandomizeABTestPlayers()
     abTestBaseNodeStates = {}
     for _, baseNode in ipairs(BASE_NODES) do
         HideContestedBase(baseNode.id)
     end
 
-    print("|cff33ff99Zurk Maps|r AB test mode: 15 moving gold friendly blips with generated Horde names + randomized assaults that resolve to full control:")
+    local sweepFaction = nil
+    local sweepRoll = math.random()
+    if sweepRoll < 0.05 then
+        sweepFaction = "Alliance"
+    elseif sweepRoll < 0.10 then
+        sweepFaction = "Horde"
+    end
+
     for _, baseNode in ipairs(BASE_NODES) do
-        local faction = math.random(1, 2) == 1 and "Alliance" or "Horde"
-        local seconds = math.random(12, 35)
+        local faction = sweepFaction or (math.random(1, 2) == 1 and "Alliance" or "Horde")
+        local seconds = math.random(5, 10)
         local stateOffset = faction == "Alliance" and 1 or 3
         local textureIndex = baseNode.neutralTextureIndex + stateOffset
         abTestBaseNodeStates[baseNode.id] = textureIndex
         UpdateBaseNodeButton(baseNode, textureIndex)
         StartContestedBase(baseNode, faction, seconds, "random all-base test", nil)
-        print(string.format("  %s: %s assaulting, %ds", baseNode.name, faction, seconds))
     end
     if ShowABTestBlips then
         ShowABTestBlips()
@@ -4263,6 +5788,13 @@ local function UpdateVisibility()
     if RefreshBaseNodes then
         RefreshBaseNodes()
     end
+    if frame.abWinTimer and not abTestMode then
+        if inAB then
+            frame.abWinTimer:RefreshLive()
+        elseif frame.abWinTimer.activated or frame.abWinTimer.testRunning then
+            frame.abWinTimer:EndTest()
+        end
+    end
 
     return true
 end
@@ -4283,7 +5815,7 @@ local function PrintABOptions()
     print("Hotspot menus: 1+ to 7+, plus Safe for bases or Get OUT elsewhere.")
     print("Base nodes: left-click SPIN, right-click HELP, Shift-click weak.")
     print("|cffffff00/ab testcontest ST ally 60|r - Preview one contested hotspot animation/timer.")
-    print("|cffffff00/ab test|r - Show 15 moving gold friendly blips plus assaults that resolve into full control.")
+    print("|cffffff00/ab test|r - Show moving blips, resolving base captures, and the live AB win-pace timer.")
     print("|cffffff00/ab test off|r - Stop AB simulation and restore live data.")
     print("|cffffff00/ab testcontest off|r - Stop contested visual test mode.")
     print("|cffffff00/ab timerdebug|r - Print live AB AreaPOI timer data for verification.")
@@ -4321,13 +5853,11 @@ SlashCmdList["ABCALLOUTS"] = function(msg)
     elseif msg == "test off" or msg == "test clear" then
         ClearContestTestMode()
         UpdateVisibility()
-        print("|cff33ff99Zurk Maps|r AB test mode stopped; live data restored.")
     elseif string.find(msg, "^testcontest") then
         local _, _, arg1, arg2, arg3 = string.find(msg, "^testcontest%s*(%S*)%s*(%S*)%s*(%S*)")
         if arg1 == "off" or arg1 == "clear" then
             ClearContestTestMode()
             UpdateVisibility()
-            print("|cff33ff99Zurk Maps|r contested visual test mode stopped.")
         elseif arg1 == "all" or arg1 == "random" then
             StartAllContestTests()
         else

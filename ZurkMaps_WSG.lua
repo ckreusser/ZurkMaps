@@ -2673,6 +2673,49 @@ local function GetFocusClassDisplayName(classInfo)
     return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classInfo.token]) or classInfo.name
 end
 
+local FOCUS_RAID_TARGET_CHAT_TAGS = {
+    [1] = "{star}",
+    [2] = "{circle}",
+    [3] = "{diamond}",
+    [4] = "{triangle}",
+    [5] = "{moon}",
+    [6] = "{square}",
+    [7] = "{cross}",
+    [8] = "{skull}",
+}
+
+local function ReportCurrentFocusTarget()
+    if not UnitExists("target") or not UnitIsPlayer("target") then
+        print("|cff33ff99Zurk Maps|r: Select a player target first.")
+        return
+    end
+
+    local name = UnitName("target")
+    if not name or name == "" then
+        print("|cff33ff99Zurk Maps|r: Could not identify the current target.")
+        return
+    end
+
+    if UnitIsFriend("player", "target") then
+        local markerIndex = GetRaidTargetIndex and GetRaidTargetIndex("target")
+        local markerTag = markerIndex and FOCUS_RAID_TARGET_CHAT_TAGS[markerIndex]
+        if markerTag then
+            Report("Assist " .. name .. " " .. markerTag .. "!")
+        else
+            Report("Assist " .. name .. "!")
+        end
+        return
+    end
+
+    local race = UnitRace("target")
+    local className = UnitClass("target")
+    if race and race ~= "" and className and className ~= "" then
+        Report("Focus " .. name .. " - " .. race .. " " .. className .. "!")
+    else
+        Report("Focus " .. name .. "!")
+    end
+end
+
 -- Fallbacks are included in case a Classic client does not expose the shared tables.
 local CLASS_COLOR_FALLBACK = {
     WARRIOR = { 0.78, 0.61, 0.43 },
@@ -3102,7 +3145,7 @@ focusButton = CreateFrame("Button", nil, map)
 focusButton:SetSize(FOCUS_BUTTON_SIZE, FOCUS_BUTTON_SIZE)
 focusButton:SetPoint("TOPRIGHT", map, "TOPRIGHT", -7, -7)
 focusButton:SetFrameLevel(mapBorder:GetFrameLevel() + 3)
-focusButton:RegisterForClicks("LeftButtonUp")
+focusButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
 local focusBackground = focusButton:CreateTexture(nil, "BACKGROUND")
 focusBackground:SetAllPoints()
@@ -3247,7 +3290,7 @@ for i = 1, 8 do
             return
         end
         CloseFocusMenu()
-        Report("FOCUS the " .. self.classNameUpper .. "!")
+        Report("Focus the " .. self.classNameUpper .. "!")
     end)
 
     focusOptionButtons[i] = option
@@ -3258,8 +3301,10 @@ focusButton:SetScript("OnEnter", function(self)
     focusBorder:SetAlpha(1)
 
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText("Focus Callout")
-    GameTooltip:AddLine("Choose the enemy class your team should focus.", 0.8, 0.8, 0.8, true)
+    GameTooltip:SetText("Focus Callout", 1.0, 0.82, 0.0)
+    GameTooltip:AddDoubleLine(((type(CreateAtlasMarkup) == "function" and (((C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("NPE_LeftClick")) or (type(GetAtlasInfo) == "function" and GetAtlasInfo("NPE_LeftClick")))) and CreateAtlasMarkup("NPE_LeftClick", 18, 18, 0, 0) or "LMB") .. " |cffff7070Enemy|r"), "|cffffffffFocus target|r", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+    GameTooltip:AddDoubleLine(((type(CreateAtlasMarkup) == "function" and (((C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("NPE_LeftClick")) or (type(GetAtlasInfo) == "function" and GetAtlasInfo("NPE_LeftClick")))) and CreateAtlasMarkup("NPE_LeftClick", 18, 18, 0, 0) or "LMB") .. " |cff70ff70Friendly|r"), "|cffffffffAssist target|r", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+    GameTooltip:AddDoubleLine(((type(CreateAtlasMarkup) == "function" and (((C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("NPE_RightClick")) or (type(GetAtlasInfo) == "function" and GetAtlasInfo("NPE_RightClick")))) and CreateAtlasMarkup("NPE_RightClick", 18, 18, 0, 0) or "RMB") .. " |cffffd36aMenu|r"), "|cffffffffChoose enemy class|r", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     GameTooltip:Show()
 end)
 
@@ -3274,7 +3319,18 @@ focusButton:SetScript("OnLeave", function()
     GameTooltip:Hide()
 end)
 
-focusButton:SetScript("OnClick", function()
+focusButton:SetScript("OnClick", function(_, mouseButton)
+    if mouseButton == "LeftButton" then
+        CloseFocusMenu()
+        GameTooltip:Hide()
+        ReportCurrentFocusTarget()
+        return
+    end
+
+    if mouseButton ~= "RightButton" then
+        return
+    end
+
     if focusMenu:IsShown() then
         CloseFocusMenu()
         return
@@ -4192,7 +4248,6 @@ local function StartWSGTestMode()
         UpdateCarrierFrameVisuals(true)
     end
     UpdateVisibility()
-    print("|cff33ff99Zurk Maps|r WSG test mode: 10 moving gold friendly blips with generated Horde names, simulated friendly FC, and simulated EFC enabled.")
 end
 
 local function ClearWSGTestMode(silent, deferVisibility)
@@ -4207,7 +4262,6 @@ local function ClearWSGTestMode(silent, deferVisibility)
         UpdateVisibility()
     end
     if not silent then
-        print("|cff33ff99Zurk Maps|r WSG test mode stopped; live data restored.")
     end
 end
 

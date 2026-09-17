@@ -4,6 +4,24 @@ All notable changes to Zurk Maps will be documented in this file.
 
 ## Unreleased
 
+## Zurk Maps 1.3.0-r21
+
+### Added
+
+- Added an Arathi Basin win-pace bar that appears after the first base is fully controlled, showing the projected winner, progress toward 2,000 resources, and estimated time remaining from current scores and controlled-base resource rates.
+- Added clickable AB time reports: "Alliance/Horde win in ~M:SS if bases hold", using the selected callout channel.
+- Added faction-colored pace glows, animated faction icons, stronger effects as base control increases, five-base lightning and crackling electricity, and an animated victory banner. Five-base effects fade when control is lost.
+- Added target-specific Focus/Assist callouts to WSG and AB. Left-click reports an enemy player's name, race, and class, or requests assistance for a friendly player with their raid marker when available. Right-click opens the enemy-class menu.
+
+### Changed
+
+- Extended AB test mode with simulated resource scoring and the win-pace timer.
+- Kept AB teammate blips, rank helmets, and assigned markers above objective artwork while retaining base-node click priority with an invisible 5% interaction buffer.
+- Updated Focus button tooltips and standardized class callouts to "Focus the CLASS!".
+- Removed trailing exclamation marks from AB visible, road, and location reports while retaining incoming alerts.
+- Silenced routine test-mode start/stop chat messages across WSG, AB, and AV.
+- Updated promo wording to clarify Honor Bar locking and expanded the Honor Bar promo rotation.
+
 ## Zurk Maps 1.3.0-r20
 
 ### Added

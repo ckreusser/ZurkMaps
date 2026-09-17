@@ -1733,8 +1733,8 @@ SlashCmdList["AVCALLOUTS"]=function(msg)
     elseif msg=="hide" then manualVisibility="hide"; if avTestMode then testPreviousManualVisibility="hide" end; UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV map hidden.")
     elseif msg=="reset" then ResetLayout(); print("|cff33ff99Zurk Maps|r AV position and size reset.")
     elseif msg=="refresh" then RefreshObjectives(); print("|cff33ff99Zurk Maps|r AV objectives refreshed.")
-    elseif msg=="test" then SetTestMode(true); UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV test mode enabled.")
-    elseif msg=="test off" or msg=="test clear" then SetTestMode(false); UpdateVisibility(); print("|cff33ff99Zurk Maps|r AV test mode disabled.")
+    elseif msg=="test" then SetTestMode(true); UpdateVisibility()
+    elseif msg=="test off" or msg=="test clear" then SetTestMode(false); UpdateVisibility()
     else print("|cff33ff99Zurk Maps|r AV commands: |cffffff00/av show|r, |cffffff00/av hide|r, |cffffff00/av reset|r, |cffffff00/av refresh|r, |cffffff00/av test|r, |cffffff00/av test off|r") end
 end
 

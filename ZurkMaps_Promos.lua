@@ -15,7 +15,7 @@ ZurkMapsPromos.wsgMessages = {
     "Know when the EFC is about to drop. When the visible EFC crosses 40%, 20%, or 10% health, Zurk Maps reports it; meaningful heals re-arm thresholds with anti-spam timing. curseforge.com/wow/addons/zurk-maps",
     "Make the team readable. WSG teammate blips switch between Gold and Class Colors, R12-R14 players get class-colored helmets, and any standout can be marked Elite or Raid Boss. curseforge.com/wow/addons/zurk-maps",
     "Keep the grind beside the flag fight. WSG's Honor Bar tracks weekly honor, exact breakpoint progress, and estimated games remaining from your recent WSG honor history. curseforge.com/wow/addons/zurk-maps",
-    "Fit WSG to your UI: drag and resize the map, lock its position, tune opacity, choose /bg or /RW calls, and detach or reorient the shared Honor Bar. curseforge.com/wow/addons/zurk-maps",
+    "Fit WSG to your UI: drag and resize the map, tune opacity, choose /bg or /RW calls, and detach, reorient, or lock the shared Honor Bar. curseforge.com/wow/addons/zurk-maps",
 }
 
 ZurkMapsPromos.abMessages = {
@@ -26,18 +26,18 @@ ZurkMapsPromos.abMessages = {
     "Read rotations before they arrive. Live friendly blips show who is holding, crossing water, or moving between ST, GM, LM, BS, and Farm on a purpose-built AB map. curseforge.com/wow/addons/zurk-maps",
     "Identify your AB team quickly with Gold or Class Colors, class-colored R12-R14 helmets, persistent rank detection, and right-click Elite or Raid Boss assignments. curseforge.com/wow/addons/zurk-maps",
     "Plan the honor session from AB. The shared bar shows weekly honor and breakpoint distance, then uses up to 50 recorded AB games to estimate your remaining queues. curseforge.com/wow/addons/zurk-maps",
-    "Shape Zurk Maps around your AB setup: move, resize, lock, and fade the map; route calls through /bg or /RW; and save a custom faction-aware Battlecry. curseforge.com/wow/addons/zurk-maps",
+    "Shape Zurk Maps around your AB setup: move, resize, and fade the map; route calls through /bg or /RW; save a custom faction-aware Battlecry; and lock the Honor Bar where you want it. curseforge.com/wow/addons/zurk-maps",
 }
 
 ZurkMapsPromos.avMessages = {
     "See the whole AV war state on one map: every tower, bunker, graveyard, and mine, including neutral Snowfall and both faction bases, updates from live objective data. curseforge.com/wow/addons/zurk-maps",
-    "Track every five-minute assault. Zurk Maps gives AV towers and graveyards fixed M:SS clocks; left-click reports time, while right-click calls reinforcements or marks the objective weak. curseforge.com/wow/addons/zurk-maps",
+    "Zurk Maps is a full replacement for Capping in AV: objective assault timers live directly on towers, bunkers, and graveyards, with exact-time reports, reinforcement calls, and weak-objective calls built in. curseforge.com/wow/addons/zurk-maps",
     "Hunt AV honor targets without guessing. Lieutenants, commanders, captains, and the enemy general have faction blips, status tooltips, secure targeting, and mapped patrol routes. curseforge.com/wow/addons/zurk-maps",
     "Watch distant honor NPC fights unfold. Shared health observations add health bars and combat pulses; confirmed deaths trigger a skull, honor-gain float, and synced status for other Zurk Maps users. curseforge.com/wow/addons/zurk-maps",
     "Lead the AV push with five saved message buttons plus an editable Battlecry. Quick messages support multiple /bg lines and raid-marker tags, and edited or blank slots stay yours. curseforge.com/wow/addons/zurk-maps",
     "Turn a 40-player AV raid into readable roles: live class-colored blips, special R12-R14 helmets, and persistent Elite or Raid Boss markers help priority players stand out. curseforge.com/wow/addons/zurk-maps",
     "Measure AV's payoff while you play. Zurk Maps records honor from up to 50 AV runs, shows the recent honor/game average, and estimates queues to your next PvP breakpoint. curseforge.com/wow/addons/zurk-maps",
-    "Control the AV board your way: drag, resize, lock, and adjust opacity; choose /bg or /RW callouts; then detach the Honor Bar to keep progress visible after the map closes. curseforge.com/wow/addons/zurk-maps",
+    "Control the AV board your way: drag, resize, and adjust map opacity; choose /bg or /RW callouts; then detach, position, and lock the Honor Bar to keep progress visible after the map closes. curseforge.com/wow/addons/zurk-maps",
 }
 
 -- CTRL+SHIFT-clicking the Honor Bar uses its own promo pool regardless of battleground.
@@ -49,6 +49,7 @@ ZurkMapsPromos.honorMessages = {
     "Keep progress visible between queues. Detach the Honor Bar from the active map and leave it on-screen in town; it follows the most recently played battleground's history. curseforge.com/wow/addons/zurk-maps",
     "Build the bar around your UI. Unlock it to move and resize, switch between vertical and horizontal layouts, detach or reattach it, then lock the finished placement. curseforge.com/wow/addons/zurk-maps",
     "Read earned and unrealized honor instantly. Solid faction-colored metal marks completed progress, animated stripes mark the next segment, and new honor visibly fills the bar. curseforge.com/wow/addons/zurk-maps",
+    "Zurk Maps is better than Ranker when you want your grind readable at a glance: the Honor Bar stays visible, shows breakpoint progress visually, and estimates games remaining without digging through menus or dense text. curseforge.com/wow/addons/zurk-maps",
     "Cross a rank-up breakpoint and Zurk Maps celebrates after you leave the BG with your name, new title and badge, animated progress, faction rally text, and weekly-reset reminder. curseforge.com/wow/addons/zurk-maps",
 }
 

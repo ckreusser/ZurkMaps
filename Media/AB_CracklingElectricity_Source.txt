@@ -1,0 +1,16 @@
+Source: Jordan Irwin (AntumDeluge), "Electricity Overlay Effect", OpenGameArt.org.
+Canonical page: https://opengameart.org/content/electricity-overlay-effect
+Source repository: https://github.com/AntumDeluge/game-resources/tree/master/animation/electricity
+License used by Zurk Maps: Creative Commons Attribution 4.0 (CC BY 4.0).
+Attribution notice from source: Jordan Irwin (AntumDeluge).
+
+Zurk Maps uses the original red and blue 48x64 animation strips, repacked into 512x512 TGA atlases for WoW texture compatibility. No generative edits were used.
+
+Zurk Maps fixed31 visibility pass: blank source frames were omitted from the runtime atlas, the original visible spark pixels were enlarged without redrawing their shape, and a soft faction-colored halo was added so the CC BY source remains readable at the AB capturebar scale.
+
+
+Additional derivative work for longer in-bar arc animation:
+- The local AB_CracklingElectricity_Alliance/Horde TGA atlases were further rebuilt
+  from the sourced electricity frames into longer 4x4 (15-frame used) crackling-arc
+  atlases so the in-bar 5-base arc can be revealed across the capture bar without
+  heavily distorting the original small source frames.
