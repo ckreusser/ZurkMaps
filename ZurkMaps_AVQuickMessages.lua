@@ -299,6 +299,38 @@ function Quick.Create(options)
         end
     end
 
+    -- SendChatMessage treats a raw pipe (|) as the beginning of a WoW UI
+    -- escape sequence. Human-readable separators such as "A | B" therefore
+    -- invalidate the entire message. Preserve real WoW escapes/links, but turn
+    -- any plain pipe into a safe slash before handing text to chat.
+    local function SanitizeChatText(text)
+        text = tostring(text or "")
+        local allowedEscape = {
+            A = true, a = true, -- atlas markup
+            T = true, t = true, -- texture markup
+            H = true, h = true, -- hyperlinks
+            c = true, r = true, -- color start/reset
+        }
+        local out = {}
+        local i = 1
+        local length = string.len(text)
+        while i <= length do
+            local ch = string.sub(text, i, i)
+            if ch == "|" then
+                local nextChar = string.sub(text, i + 1, i + 1)
+                if allowedEscape[nextChar] then
+                    out[#out + 1] = ch
+                else
+                    out[#out + 1] = "/"
+                end
+            else
+                out[#out + 1] = ch
+            end
+            i = i + 1
+        end
+        return table.concat(out)
+    end
+
     function quick:Send(slot)
         local message = Trim(self:GetMessage(slot))
         if message == "" then
@@ -306,14 +338,17 @@ function Quick.Create(options)
             return
         end
 
-        if options.sendBGMessage then
-            local lines = SplitLines(message)
-            for _, rawLine in ipairs(lines) do
-                local cleanLine = self:ResolveLine(rawLine)
-                cleanLine = Trim(cleanLine)
-                if cleanLine ~= "" then
-                    options.sendBGMessage(cleanLine)
-                end
+        if not options.sendBGMessage then return end
+
+        -- Keep every send inside the original click. Outdoors, SAY/YELL require
+        -- a hardware event; delaying follow-up lines would make them fail. In a
+        -- battleground INSTANCE_CHAT does not need the workaround either.
+        local lines = SplitLines(message)
+        for _, rawLine in ipairs(lines) do
+            local cleanLine = self:ResolveLine(rawLine)
+            cleanLine = SanitizeChatText(Trim(cleanLine))
+            if cleanLine ~= "" then
+                options.sendBGMessage(cleanLine)
             end
         end
     end

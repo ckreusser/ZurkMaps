@@ -4,6 +4,12 @@ All notable changes to Zurk Maps will be documented in this file.
 
 ## Unreleased
 
+## Zurk Maps 1.3.0-r22
+
+### Fixed
+
+- Fixed Alterac Valley quick-message lines failing to send when they contain plain pipe (`|`) separators, including the default role-assignment messages. Plain pipes are now sent as slashes (`/`), while recognized WoW link, color, texture, and atlas escape prefixes are preserved.
+
 ## Zurk Maps 1.3.0-r21
 
 ### Added
