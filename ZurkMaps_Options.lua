@@ -312,6 +312,14 @@ local function EnsureMenuFrame()
         GameTooltip:Show()
     end)
     frame.efcHealthRow:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    frame.resurrectionRow = CreateValueRow(frame, "Resurrection Timer")
+    frame.resurrectionRow:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Resurrection Timer")
+        GameTooltip:AddLine("Show the resurrection icon and countdown on this map, including Test Mode.", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    frame.resurrectionRow:HookScript("OnLeave", function() GameTooltip:Hide() end)
     frame.honorRow = CreateValueRow(frame, "Honor Bar")
     frame.honorLabel, frame.honorModeValue = frame.honorRow.text, frame.honorRow.value
     frame.honorClickArea = frame.honorRow
@@ -575,6 +583,7 @@ local function BuildMenu(frame, config)
     frame.honorUnlockRow:Hide()
     frame.testRow:Hide()
     frame.efcHealthRow:Hide()
+    frame.resurrectionRow:Hide()
 
     local rowY = -34
     local function PlaceRow(row)
@@ -596,6 +605,17 @@ local function BuildMenu(frame, config)
     PlaceRow(frame.switchClickArea)
     frame.classButton.value:SetText(Options.UseClassBlips() and "Class Colors" or "Gold")
     PlaceRow(frame.classButton)
+    if type(config.getResurrectionTimerEnabled) == "function" and type(config.setResurrectionTimerEnabled) == "function" then
+        local function UpdateResurrectionValue()
+            frame.resurrectionRow.value:SetText(config.getResurrectionTimerEnabled() and "On" or "Off")
+        end
+        frame.resurrectionRow:SetScript("OnClick", function()
+            config.setResurrectionTimerEnabled(not config.getResurrectionTimerEnabled())
+            UpdateResurrectionValue()
+        end)
+        UpdateResurrectionValue()
+        PlaceRow(frame.resurrectionRow)
+    end
     if type(config.getAutoEFCHealthEnabled) == "function" and type(config.setAutoEFCHealthEnabled) == "function" then
         frame.efcHealthRow.value:SetText(frame.efcHealthEnabled and "On" or "Off")
         frame.efcHealthRow.value:SetTextColor(

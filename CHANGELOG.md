@@ -4,6 +4,21 @@ All notable changes to Zurk Maps will be documented in this file.
 
 ## Unreleased
 
+## Zurk Maps 1.3.0-r23
+
+### Added
+
+- Added resurrection-wave timers to Arathi Basin, Warsong Gulch, and Alterac Valley, using the blue winged resurrection icon with map-specific placement.
+- Added a separate saved **Resurrection Timer** On/Off option to each map's options menu, enabled by default and available in both battlegrounds and test mode.
+- Synced live timing to observed spirit-healer countdowns, with estimated subsequent 30-second waves. Unsynced timers show `--` on mouseover; test mode previews a repeating countdown.
+- Added a smooth bottom-up color fill over a stationary silhouette, a gold completion shine, and a completed-icon hold that fades into the next wave's fill.
+
+### Changed
+
+- Made resurrection countdown text appear only on mouseover, with quick fades in and out, yellow outlined digits, no tooltip or text background, and centered single-digit seconds without a leading zero.
+- Made resurrection icons scale with their maps while preserving a minimum readable countdown font size. Icons brighten on mouseover.
+- Replaced the AB header promo and all eight rotating promos with shorter messages covering incoming calls, estimated win time, capture clocks, rotations, road reports, Focus calls, honor progress, and keeping the battle visible without pressing M.
+
 ## Zurk Maps 1.3.0-r22
 
 ### Fixed

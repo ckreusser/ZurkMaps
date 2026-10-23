@@ -1350,9 +1350,25 @@ local function ClearFriendlyPlayerTooltip()
 end
 
 local playerHoverElapsed=0
+frame.avResurrectionTimer = ZurkMapsResurrection.Create(map, mapBorder, {
+    getMapScale = function() return frame:GetScale() end,
+    getPosition = function()
+        return 7 + (avBattlecry and avBattlecry.button:GetWidth() or 33) / 2 - map:GetWidth() / 2,
+            map:GetHeight() * 0.12
+    end,
+    getDB = function() return ZurksAVCalloutMapDB end,
+    isInBattleground = IsInAlteracValley,
+    isTestMode = function() return avTestMode end,
+    onEnter = ClearFriendlyPlayerTooltip,
+})
+
 local playerHoverFrame=CreateFrame("Frame", nil, frame)
 playerHoverFrame:SetScript("OnUpdate",function(_,elapsed)
     if not frame:IsShown() or isMoving or resizing or (ZurkMapsOptions and ZurkMapsOptions.menu and ZurkMapsOptions.menu:IsShown()) then return end
+    if frame.avResurrectionTimer:IsShown() and frame.avResurrectionTimer:IsMouseOver() then
+        ClearFriendlyPlayerTooltip()
+        return
+    end
 
     -- The player-blip hover manager shares GameTooltip with the map controls.
     -- Do not let a stale player-hover signature clear/replace the header or
@@ -1748,6 +1764,8 @@ if ZurkMapsOptions then
         closeCommand="hide",
         runCommand=function(command) SlashCmdList["AVCALLOUTS"](command or "") end,
         isTestModeActive=function() return IsTestModeActive() end,
+        getResurrectionTimerEnabled=function() return frame.avResurrectionTimer:IsEnabled() end,
+        setResurrectionTimerEnabled=function(value) frame.avResurrectionTimer:SetEnabled(value) end,
         isHonorBarVisible=function() return IsHonorBarVisible() end,
         setHonorBarVisible=function(value) SetHonorBarVisible(value) end,
         getHonorBarMode=function() return GetHonorBarMode() end,

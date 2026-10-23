@@ -3,7 +3,7 @@ ZurkMapsPromos = ZurkMapsPromos or {}
 
 ZurkMapsPromos.header = {
     WSG = "Zurk Maps: fast WSG flag-carrier callouts, live teammate blips, and FC tracking. curseforge.com/wow/addons/zurk-maps",
-    AB = "Zurk Maps: fast AB base-control callouts, live base states, timers, and teammate rotations. curseforge.com/wow/addons/zurk-maps",
+    AB = "Zurk Maps for AB: incoming calls, live base states, capture countdowns, teammate tracking, and estimated time to win. Run the battle from your map. curseforge.com/wow/addons/zurk-maps",
     AV = "Zurk Maps: live Alterac Valley objectives, honor NPC tracking, teammate blips, and ranking progress. curseforge.com/wow/addons/zurk-maps",
 }
 
@@ -19,14 +19,14 @@ ZurkMapsPromos.wsgMessages = {
 }
 
 ZurkMapsPromos.abMessages = {
-    "See the five-base race live. Zurk Maps displays every AB flag as neutral, controlled, or contested, with faction-colored capture clocks and completion pulses. curseforge.com/wow/addons/zurk-maps",
-    "Call more than bases. Click AB's bridges, graveyard water, intersections, and major roads for numbered incoming reports or a fast GET OUT warning. curseforge.com/wow/addons/zurk-maps",
-    "Make the right base call instantly: mark a flag Safe or 1+ through 7+, Shift-click it as weak, right-click for help, or call SPIN while it is contested. curseforge.com/wow/addons/zurk-maps",
-    "Never guess a cap timer. Zurk Maps counts down contested AB flags, lets you click the clock to report exact seconds remaining, and animates the faction that finishes the claim. curseforge.com/wow/addons/zurk-maps",
-    "Read rotations before they arrive. Live friendly blips show who is holding, crossing water, or moving between ST, GM, LM, BS, and Farm on a purpose-built AB map. curseforge.com/wow/addons/zurk-maps",
-    "Identify your AB team quickly with Gold or Class Colors, class-colored R12-R14 helmets, persistent rank detection, and right-click Elite or Raid Boss assignments. curseforge.com/wow/addons/zurk-maps",
-    "Plan the honor session from AB. The shared bar shows weekly honor and breakpoint distance, then uses up to 50 recorded AB games to estimate your remaining queues. curseforge.com/wow/addons/zurk-maps",
-    "Shape Zurk Maps around your AB setup: move, resize, and fade the map; route calls through /bg or /RW; save a custom faction-aware Battlecry; and lock the Honor Bar where you want it. curseforge.com/wow/addons/zurk-maps",
+    "Typing 'inc BS' while getting jumped? Zurk Maps sends numbered incoming calls straight from the AB map, with quick help, weak-base, and SPIN calls. curseforge.com/wow/addons/zurk-maps",
+    "Can your three bases finish the game? Zurk Maps estimates time to win from the current AB score and base control, updating as the battle changes. curseforge.com/wow/addons/zurk-maps",
+    "How long until that flag caps? Zurk Maps puts capture countdowns on contested AB bases. Click a clock to tell your team exactly how many seconds remain. curseforge.com/wow/addons/zurk-maps",
+    "Five at Farm and nobody at BS? See your team's positions on Zurk Maps with live friendly blips and optional class colors. Check the map before your next rotation. curseforge.com/wow/addons/zurk-maps",
+    "The fight starts before they reach the flag. Zurk Maps lets you call incoming at AB bridges, roads, intersections, and graveyard water, plus send GET OUT warnings. curseforge.com/wow/addons/zurk-maps",
+    "Need your team on the same target? Zurk Maps has quick enemy-target and class Focus calls built into the AB map. Pick the threat and make the call. curseforge.com/wow/addons/zurk-maps",
+    "How many more ABs to your honor goal? Zurk Maps tracks weekly honor, shows your next breakpoint, and estimates games remaining from your recorded AB results. curseforge.com/wow/addons/zurk-maps",
+    "Stop pressing M to check the battle. Zurk Maps keeps AB's bases, capture timers, and teammate positions visible while you fight. curseforge.com/wow/addons/zurk-maps",
 }
 
 ZurkMapsPromos.avMessages = {

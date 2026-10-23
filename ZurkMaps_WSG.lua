@@ -1974,6 +1974,7 @@ UpdateMoveHandleScale = function(addonScale)
         ""
     )
     moveHandle:UpdateGeometry(compensationScale)
+    if frame.wsgResurrectionTimer then frame.wsgResurrectionTimer:UpdateScale(addonScale) end
 end
 
 -- Initialize geometry at the default scale before the first resize event.
@@ -3772,6 +3773,7 @@ map:SetScript("OnUpdate", function(self, elapsed)
     end
 
     if turtleMenu:IsShown() or turtleButton:IsMouseOver() or focusMenu:IsShown() or focusButton:IsMouseOver()
+        or (frame.wsgResurrectionTimer and frame.wsgResurrectionTimer:IsShown() and frame.wsgResurrectionTimer:IsMouseOver())
         or (ZurkMapsWSGBattlecry and ZurkMapsWSGBattlecry:IsInteracting()) then
         ShowZone(nil)
         return
@@ -4088,6 +4090,15 @@ local function IsInWarsongGulch()
         or zone == "Warsong Gulch"
 end
 
+frame.wsgResurrectionTimer = ZurkMapsResurrection.Create(map, mapBorder, {
+    getMapScale = function() return frame:GetScale() end,
+    getPosition = function() return map:GetWidth() * 0.26, map:GetHeight() * 0.08 end,
+    getDB = function() return ZurksWSGCalloutMapDB end,
+    isInBattleground = IsInWarsongGulch,
+    isTestMode = function() return wsgTestMode end,
+    onEnter = function() ClearFriendlyPlayerTooltip(); ShowZone(nil) end,
+})
+
 local function CleanCarrierName(name)
     if not name then return nil end
     name = name:gsub("!+$", "")
@@ -4351,6 +4362,8 @@ if ZurkMapsOptions then
         closeCommand = "hide",
         runCommand = function(command) SlashCmdList["WSGCALLOUTS"](command or "") end,
         isTestModeActive = function() return wsgTestMode end,
+        getResurrectionTimerEnabled = function() return frame.wsgResurrectionTimer:IsEnabled() end,
+        setResurrectionTimerEnabled = function(value) frame.wsgResurrectionTimer:SetEnabled(value) end,
         getAutoEFCHealthEnabled = function() return ZurkMapsWSGEFCHealth.IsEnabled() end,
         setAutoEFCHealthEnabled = function(value)
             ZurksWSGCalloutMapDB.autoEFCHealth = value and true or false

@@ -2719,6 +2719,9 @@ local function UpdateMoveHandleScale(addonScale)
     if ConfigureBattlecryPanel then
         ConfigureBattlecryPanel(addonScale)
     end
+    if frame.abResurrectionTimer then
+        frame.abResurrectionTimer:UpdateScale(addonScale)
+    end
 end
 
 moveHandle:UpdateGeometry(1)
@@ -5675,6 +5678,15 @@ end)
 
 frame:HookScript("OnHide", CloseIncomingMenu)
 
+frame.abResurrectionTimer = ZurkMapsResurrection.Create(map, mapBorder, {
+    shoutButton = battlecry.button,
+    getMapScale = function() return frame:GetScale() end,
+    getDB = function() return ZurksABCalloutMapDB end,
+    isInBattleground = IsInArathiBasin,
+    isTestMode = function() return abTestMode or contestedTestMode end,
+    onEnter = function() ClearFriendlyPlayerTooltip(); ShowZone(nil) end,
+})
+
 map:SetScript("OnUpdate", function(self, elapsed)
     highlightTexture:UpdateInteractionAnimation(elapsed)
 
@@ -5683,6 +5695,7 @@ map:SetScript("OnUpdate", function(self, elapsed)
     end
 
     if isMoving or resizing
+        or (frame.abResurrectionTimer:IsShown() and frame.abResurrectionTimer:IsMouseOver())
         or (incomingMenu and incomingMenu:IsShown())
         or (focusCallout and focusCallout.menu and focusCallout.menu:IsShown())
         or (focusCallout and focusCallout.button and focusCallout.button:IsMouseOver())
@@ -5878,6 +5891,8 @@ if ZurkMapsOptions then
         closeCommand = "hide",
         runCommand = function(command) SlashCmdList["ABCALLOUTS"](command or "") end,
         isTestModeActive = function() return contestedTestMode or abTestMode end,
+        getResurrectionTimerEnabled = function() return frame.abResurrectionTimer:IsEnabled() end,
+        setResurrectionTimerEnabled = function(value) frame.abResurrectionTimer:SetEnabled(value) end,
         isHonorBarVisible = function() return frame.IsABHonorBarVisible() end,
         setHonorBarVisible = function(value) frame.SetABHonorBarVisible(value) end,
         getHonorBarMode = function() return frame.GetABHonorBarMode() end,
